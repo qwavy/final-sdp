@@ -1,0 +1,11 @@
+# данные создаются при первом запуске (тестовые данные загружаются автоматически)
+backend/data/
+
+frontend/node_modules/
+frontend/dist/
+
+.DS_Store
+*.tmp
+
+# локальные настройки Claude Code
+.claude/
