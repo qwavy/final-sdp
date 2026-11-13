@@ -14,10 +14,10 @@ import (
 
 // Store открывает все JSON-файлы в папке данных.
 type Store struct {
-	Orders       *Collection[*domain.Order]
-	Customers    *Collection[*domain.Customer]
-	Couriers     *Collection[*domain.Courier]
-	PickupPoints *Collection[*domain.PickupPoint]
+	Orders       *Collection[domain.Order]
+	Customers    *Collection[domain.Customer]
+	Couriers     *Collection[domain.Courier]
+	PickupPoints *Collection[domain.PickupPoint]
 	Activity     *ActivityLog
 	Exports      *ExportFolder
 }
@@ -95,7 +95,7 @@ func (l *ActivityLog) Append(entry port.ActivityEntry) error {
 	if err != nil {
 		return err
 	}
-	return writeFileAtomic(l.path, data)
+	return os.WriteFile(l.path, data, 0o644)
 }
 
 // List отдаёт последние записи, самые новые первыми.
@@ -123,5 +123,5 @@ func (e *ExportFolder) SaveExport(name string, data []byte) (string, error) {
 		return "", err
 	}
 	path := filepath.Join(e.dir, filepath.Base(name))
-	return path, writeFileAtomic(path, data)
+	return path, os.WriteFile(path, data, 0o644)
 }

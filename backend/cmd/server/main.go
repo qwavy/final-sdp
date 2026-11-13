@@ -1,5 +1,5 @@
 // Parcel Hub — сервер. Здесь собираются все слои (composition root):
-// хранилище → шина событий и подписчики → фасад → HTTP.
+// хранилище → наблюдатели (Observer) → фасад → HTTP.
 package main
 
 import (
@@ -40,12 +40,10 @@ func run(addr, dataDir, staticDir string) error {
 	}
 
 	// Observer: подписываем наблюдателей на события заказов.
-	bus := events.NewBus()
-	stream := httpadapter.NewEventStream()
+	publisher := events.NewPublisher()
 	sms := notify.NewSmsNotifier(notify.NewSmsGatewayClient(filepath.Join(dataDir, "sms_outbox.jsonl")), "ParcelHub")
-	bus.Subscribe(events.NewActivityRecorder(store.Activity))
-	bus.Subscribe(events.NewCustomerNotifier(store.Orders, store.Customers, store.PickupPoints, sms, store.Activity))
-	bus.Subscribe(stream)
+	publisher.Subscribe(events.NewActivityRecorder(store.Activity))
+	publisher.Subscribe(events.NewCustomerNotifier(store.Orders, store.Customers, store.PickupPoints, sms, store.Activity))
 
 	facade := application.NewDeliveryFacade(application.Deps{
 		Orders:       store.Orders,
@@ -54,7 +52,7 @@ func run(addr, dataDir, staticDir string) error {
 		PickupPoints: store.PickupPoints,
 		Activity:     store.Activity,
 		Exports:      store.Exports,
-		Events:       bus,
+		Events:       publisher,
 		Clock:        time.Now,
 	})
 
@@ -67,7 +65,7 @@ func run(addr, dataDir, staticDir string) error {
 
 	server := &http.Server{
 		Addr:              addr,
-		Handler:           httpadapter.NewRouter(facade, stream, staticDir),
+		Handler:           httpadapter.NewRouter(facade, staticDir),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 

@@ -5,8 +5,10 @@ package command
 
 import (
 	"errors"
+	"fmt"
 	"time"
 
+	"parcelhub/internal/application/events"
 	"parcelhub/internal/application/port"
 	"parcelhub/internal/domain"
 )
@@ -30,7 +32,7 @@ type OrderCommands struct {
 	customers    port.CustomerRepository
 	couriers     port.CourierRepository
 	pickupPoints port.PickupPointRepository
-	events       port.EventPublisher
+	publisher    *events.Publisher
 	now          func() time.Time
 }
 
@@ -39,10 +41,10 @@ func NewOrderCommands(
 	customers port.CustomerRepository,
 	couriers port.CourierRepository,
 	pickupPoints port.PickupPointRepository,
-	events port.EventPublisher,
+	publisher *events.Publisher,
 	now func() time.Time,
 ) *OrderCommands {
-	return &OrderCommands{orders, customers, couriers, pickupPoints, events, now}
+	return &OrderCommands{orders, customers, couriers, pickupPoints, publisher, now}
 }
 
 func (c *OrderCommands) Create(in OrderInput) (string, error) {
@@ -50,9 +52,10 @@ func (c *OrderCommands) Create(in OrderInput) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if err := c.saveAndPublish(order); err != nil {
+	if err := c.orders.Save(order); err != nil {
 		return "", err
 	}
+	c.notify(events.OrderCreated, order.ID, fmt.Sprintf("Заказ %s создан", order.ID))
 	return order.ID, nil
 }
 
@@ -71,7 +74,11 @@ func (c *OrderCommands) Update(id string, in OrderInput) error {
 	if err := order.ApplyEdit(edited, c.now()); err != nil {
 		return err
 	}
-	return c.saveAndPublish(order)
+	if err := c.orders.Save(order); err != nil {
+		return err
+	}
+	c.notify(events.OrderUpdated, id, fmt.Sprintf("Заказ %s изменён", id))
+	return nil
 }
 
 func (c *OrderCommands) Delete(id string) error {
@@ -85,7 +92,7 @@ func (c *OrderCommands) Delete(id string) error {
 	if err := c.orders.Delete(id); err != nil {
 		return err
 	}
-	c.events.Publish(domain.OrderDeleted{OrderID: id, At: c.now()})
+	c.notify(events.OrderDeleted, id, fmt.Sprintf("Заказ %s удалён", id))
 	return nil
 }
 
@@ -110,13 +117,19 @@ func (c *OrderCommands) AssignCourier(id, selectorCode string) error {
 	if err != nil {
 		return err
 	}
+	from := order.Status
 	if err := order.AssignCourier(courier, c.now()); err != nil {
 		return err
 	}
 	if err := c.couriers.Save(courier); err != nil {
 		return err
 	}
-	return c.saveAndPublish(order)
+	if err := c.orders.Save(order); err != nil {
+		return err
+	}
+	c.notify(events.OrderStatusChanged, id, fmt.Sprintf("Заказ %s: «%s» → «%s» (%s)",
+		id, from.Title(), order.Status.Title(), courier.Name))
+	return nil
 }
 
 // ChangeStatus меняет статус. Когда заказ завершён, курьер освобождается.
@@ -125,6 +138,7 @@ func (c *OrderCommands) ChangeStatus(id, status string) error {
 	if err != nil {
 		return err
 	}
+	from := order.Status
 	if err := order.ChangeStatus(domain.OrderStatus(status), c.now()); err != nil {
 		return err
 	}
@@ -133,7 +147,12 @@ func (c *OrderCommands) ChangeStatus(id, status string) error {
 			return err
 		}
 	}
-	return c.saveAndPublish(order)
+	if err := c.orders.Save(order); err != nil {
+		return err
+	}
+	c.notify(events.OrderStatusChanged, id, fmt.Sprintf("Заказ %s: «%s» → «%s»",
+		id, from.Title(), order.Status.Title()))
+	return nil
 }
 
 func (c *OrderCommands) releaseCourier(courierID string) error {
@@ -174,10 +193,7 @@ func (c *OrderCommands) build(in OrderInput) (*domain.Order, error) {
 	return b.Build(c.now())
 }
 
-func (c *OrderCommands) saveAndPublish(order *domain.Order) error {
-	if err := c.orders.Save(order); err != nil {
-		return err
-	}
-	c.events.Publish(order.PullEvents()...)
-	return nil
+// notify оповещает наблюдателей (паттерн Observer).
+func (c *OrderCommands) notify(t events.Type, orderID, message string) {
+	c.publisher.Notify(events.Event{Type: t, OrderID: orderID, Message: message, At: c.now()})
 }

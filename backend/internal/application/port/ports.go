@@ -53,8 +53,3 @@ type Notifier interface {
 type ExportStore interface {
 	SaveExport(name string, data []byte) (string, error)
 }
-
-// EventPublisher — публикация доменных событий подписчикам.
-type EventPublisher interface {
-	Publish(events ...domain.Event)
-}

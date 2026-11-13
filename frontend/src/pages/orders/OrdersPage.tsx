@@ -7,12 +7,12 @@ import { Input } from '@/components/ui/input'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { api } from '@/lib/api'
 import { dateTime, money } from '@/lib/format'
-import { useLive, useLoad } from '@/lib/live'
+import { useApp, useLoad } from '@/lib/app'
 import { OrderDetailsDialog } from './OrderDetails'
 import { OrderFormDialog } from './OrderForm'
 
 export function OrdersPage() {
-  const { options } = useLive()
+  const { options } = useApp()
   const [status, setStatus] = useState('')
   const [search, setSearch] = useState('')
   const [creating, setCreating] = useState(false)

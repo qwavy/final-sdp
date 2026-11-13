@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { ApiError, api, errorMessage, type Order, type OrderInput, type QuoteOption } from '@/lib/api'
 import { money } from '@/lib/format'
-import { useLive, useLoad } from '@/lib/live'
+import { useApp, useLoad } from '@/lib/app'
 import { cn } from '@/lib/utils'
 
 // Поля формы храним строками, чтобы пользователь мог стереть число целиком.
@@ -57,7 +57,7 @@ export function OrderFormDialog({
   onOpenChange: (open: boolean) => void
   onSaved?: (order: Order) => void
 }) {
-  const { options } = useLive()
+  const { options, refresh } = useApp()
   const customers = useLoad(api.customers, [])
   const pickupPoints = useLoad(api.pickupPoints, [])
 
@@ -100,6 +100,7 @@ export function OrderFormDialog({
       const saved = order ? await api.updateOrder(order.id, toInput(form)) : await api.createOrder(toInput(form))
       toast.success(order ? `Заказ ${saved.id} сохранён` : `Заказ ${saved.id} создан`)
       onOpenChange(false)
+      refresh()
       onSaved?.(saved)
     } catch (e) {
       if (e instanceof ApiError && Object.keys(e.fields).length > 0) {

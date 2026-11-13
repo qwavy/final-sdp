@@ -16,7 +16,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Separator } from '@/components/ui/separator'
 import { api, errorMessage, type Order } from '@/lib/api'
 import { dateTime, money } from '@/lib/format'
-import { useLive, useLoad } from '@/lib/live'
+import { useApp, useLoad } from '@/lib/app'
 import { OrderFormDialog } from './OrderForm'
 
 export function OrderDetailsDialog({ orderId, onClose }: { orderId: string | null; onClose: () => void }) {
@@ -30,7 +30,7 @@ export function OrderDetailsDialog({ orderId, onClose }: { orderId: string | nul
 }
 
 function OrderDetails({ orderId, onDeleted }: { orderId: string; onDeleted: () => void }) {
-  const { options } = useLive()
+  const { options, refresh } = useApp()
   const { data: order, error } = useLoad(() => api.order(orderId), [orderId])
   const [selector, setSelector] = useState('nearest')
   const [busy, setBusy] = useState(false)
@@ -40,10 +40,13 @@ function OrderDetails({ orderId, onDeleted }: { orderId: string; onDeleted: () =
   if (error) return <p className="text-sm text-destructive">{error}</p>
   if (!order || !options) return <p className="text-sm text-muted-foreground">Загрузка…</p>
 
-  async function run(action: () => Promise<unknown>) {
+  // run выполняет действие, показывает результат и обновляет все таблицы.
+  async function run(action: () => Promise<Order>) {
     setBusy(true)
     try {
-      await action()
+      const updated = await action()
+      toast.success(`Заказ ${updated.id}: ${updated.statusTitle}`, { description: 'Клиенту отправлено SMS' })
+      refresh()
     } catch (e) {
       toast.error(errorMessage(e))
     } finally {
@@ -157,7 +160,16 @@ function OrderDetails({ orderId, onDeleted }: { orderId: string; onDeleted: () =
       </div>
 
       <OrderFormDialog order={order} open={editing} onOpenChange={setEditing} />
-      <DeleteOrderDialog order={order} open={confirmDelete} onOpenChange={setConfirmDelete} onDeleted={onDeleted} />
+      <DeleteOrderDialog
+        order={order}
+        open={confirmDelete}
+        onOpenChange={setConfirmDelete}
+        onDeleted={() => {
+          toast.success(`Заказ ${order.id} удалён`)
+          refresh()
+          onDeleted()
+        }}
+      />
     </>
   )
 }

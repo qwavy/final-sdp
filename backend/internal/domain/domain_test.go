@@ -34,9 +34,6 @@ func TestBuilderBuildsValidOrder(t *testing.T) {
 	if order.Price != 1550 {
 		t.Fatalf("цена = %d, ожидали 1550", order.Price)
 	}
-	if len(order.PullEvents()) != 1 {
-		t.Fatal("ожидали событие OrderCreated")
-	}
 }
 
 // Builder: неверный ввод и граничные случаи.

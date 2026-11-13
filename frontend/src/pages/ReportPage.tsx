@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { api } from '@/lib/api'
 import { money, time, today } from '@/lib/format'
-import { useLoad } from '@/lib/live'
+import { useLoad } from '@/lib/app'
 
 export function ReportPage() {
   const [date, setDate] = useState(today())

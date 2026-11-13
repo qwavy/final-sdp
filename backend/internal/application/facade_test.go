@@ -36,14 +36,14 @@ func newTestApp(t *testing.T, dir string) *testApp {
 		t.Fatal(err)
 	}
 	notifier := &fakeNotifier{}
-	bus := events.NewBus()
-	bus.Subscribe(events.NewActivityRecorder(store.Activity))
-	bus.Subscribe(events.NewCustomerNotifier(store.Orders, store.Customers, store.PickupPoints, notifier, store.Activity))
+	publisher := events.NewPublisher()
+	publisher.Subscribe(events.NewActivityRecorder(store.Activity))
+	publisher.Subscribe(events.NewCustomerNotifier(store.Orders, store.Customers, store.PickupPoints, notifier, store.Activity))
 
 	facade := application.NewDeliveryFacade(application.Deps{
 		Orders: store.Orders, Customers: store.Customers, Couriers: store.Couriers,
 		PickupPoints: store.PickupPoints, Activity: store.Activity, Exports: store.Exports,
-		Events: bus, Clock: time.Now,
+		Events: publisher, Clock: time.Now,
 	})
 	return &testApp{facade: facade, store: store, notifier: notifier}
 }

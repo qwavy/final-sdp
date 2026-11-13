@@ -6,26 +6,25 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"slices"
 	"sync"
 
 	"parcelhub/internal/domain"
 )
 
-// Collection — набор сущностей одного типа в одном JSON-файле.
-// Внутри хранится JSON каждой сущности, поэтому Get/List всегда отдают свежую копию:
-// изменения объекта не попадут в хранилище, пока не вызван Save.
+// Collection — все объекты одного типа: в памяти — map, на диске — JSON-файл.
+// После каждого изменения файл перезаписывается целиком.
 type Collection[T any] struct {
-	mu    sync.Mutex
+	mu    sync.Mutex // сервер обрабатывает запросы параллельно
 	path  string
 	what  string // «заказ», «клиент» — для текста ошибки
-	idOf  func(T) string
-	items map[string]json.RawMessage
+	idOf  func(*T) string
+	items map[string]T
 }
 
-func openCollection[T any](path, what string, idOf func(T) string) (*Collection[T], error) {
-	c := &Collection[T]{path: path, what: what, idOf: idOf, items: map[string]json.RawMessage{}}
+// openCollection читает файл, если он есть. Если файла нет — коллекция пустая.
+func openCollection[T any](path, what string, idOf func(*T) string) (*Collection[T], error) {
+	c := &Collection[T]{path: path, what: what, idOf: idOf, items: map[string]T{}}
 
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -34,83 +33,58 @@ func openCollection[T any](path, what string, idOf func(T) string) (*Collection[
 	if err != nil {
 		return nil, err
 	}
-	var list []json.RawMessage
+	var list []T
 	if err := json.Unmarshal(data, &list); err != nil {
 		return nil, fmt.Errorf("файл %s повреждён: %w", path, err)
 	}
-	for _, raw := range list {
-		var item T
-		if err := json.Unmarshal(raw, &item); err != nil {
-			return nil, fmt.Errorf("файл %s повреждён: %w", path, err)
-		}
-		c.items[idOf(item)] = raw
+	for i := range list {
+		c.items[idOf(&list[i])] = list[i]
 	}
 	return c, nil
 }
 
-func (c *Collection[T]) List() ([]T, error) {
+// List возвращает копии всех объектов, отсортированные по ID.
+func (c *Collection[T]) List() ([]*T, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	result := make([]T, 0, len(c.items))
+	result := make([]*T, 0, len(c.items))
 	for _, id := range c.sortedIDs() {
-		item, err := decode[T](c.items[id])
-		if err != nil {
-			return nil, err
-		}
-		result = append(result, item)
+		item := c.items[id] // копия значения
+		result = append(result, &item)
 	}
 	return result, nil
 }
 
-func (c *Collection[T]) Get(id string) (T, error) {
+// Get возвращает копию объекта: изменения попадут в хранилище только через Save.
+func (c *Collection[T]) Get(id string) (*T, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	raw, ok := c.items[id]
+	item, ok := c.items[id]
 	if !ok {
-		var zero T
-		return zero, domain.NotFound("%s %s не найден", c.what, id)
+		return nil, domain.NotFound("%s %s не найден", c.what, id)
 	}
-	return decode[T](raw)
+	return &item, nil
 }
 
-func (c *Collection[T]) Save(item T) error {
-	raw, err := json.Marshal(item)
-	if err != nil {
-		return err
-	}
+func (c *Collection[T]) Save(item *T) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	id := c.idOf(item)
-	previous, existed := c.items[id]
-	c.items[id] = raw
-	if err := c.flush(); err != nil {
-		if existed { // откатываем изменение в памяти, раз на диск не записалось
-			c.items[id] = previous
-		} else {
-			delete(c.items, id)
-		}
-		return err
-	}
-	return nil
+	c.items[c.idOf(item)] = *item
+	return c.writeFile()
 }
 
 func (c *Collection[T]) Delete(id string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	previous, ok := c.items[id]
-	if !ok {
+	if _, ok := c.items[id]; !ok {
 		return domain.NotFound("%s %s не найден", c.what, id)
 	}
 	delete(c.items, id)
-	if err := c.flush(); err != nil {
-		c.items[id] = previous
-		return err
-	}
-	return nil
+	return c.writeFile()
 }
 
 func (c *Collection[T]) Len() int {
@@ -128,8 +102,8 @@ func (c *Collection[T]) sortedIDs() []string {
 	return ids
 }
 
-func (c *Collection[T]) flush() error {
-	list := make([]json.RawMessage, 0, len(c.items))
+func (c *Collection[T]) writeFile() error {
+	list := make([]T, 0, len(c.items))
 	for _, id := range c.sortedIDs() {
 		list = append(list, c.items[id])
 	}
@@ -137,29 +111,5 @@ func (c *Collection[T]) flush() error {
 	if err != nil {
 		return err
 	}
-	return writeFileAtomic(c.path, data)
-}
-
-func decode[T any](raw json.RawMessage) (T, error) {
-	var item T
-	err := json.Unmarshal(raw, &item)
-	return item, err
-}
-
-// writeFileAtomic пишет во временный файл и переименовывает его,
-// чтобы при сбое не остался наполовину записанный JSON.
-func writeFileAtomic(path string, data []byte) error {
-	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".*.tmp")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(tmp.Name())
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmp.Name(), path)
+	return os.WriteFile(c.path, data, 0o644)
 }

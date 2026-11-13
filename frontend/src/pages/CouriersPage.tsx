@@ -8,11 +8,12 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { Input } from '@/components/ui/input'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { ApiError, api, errorMessage, type Courier } from '@/lib/api'
-import { useLive, useLoad } from '@/lib/live'
+import { useApp, useLoad } from '@/lib/app'
 import { ConfirmDelete } from './ConfirmDelete'
 
 export function CouriersPage() {
-  const { data: couriers, reload } = useLoad(api.couriers, [])
+  const { refresh } = useApp()
+  const { data: couriers } = useLoad(api.couriers, [])
   const { data: points } = useLoad(api.pickupPoints, [])
   const [editing, setEditing] = useState<Courier | 'new' | null>(null)
   const [deleting, setDeleting] = useState<Courier | null>(null)
@@ -80,13 +81,13 @@ export function CouriersPage() {
         </CardContent>
       </Card>
 
-      <CourierDialog courier={editing} onClose={() => setEditing(null)} onSaved={reload} />
+      <CourierDialog courier={editing} onClose={() => setEditing(null)} onSaved={refresh} />
       <ConfirmDelete
         title={`Удалить курьера «${deleting?.name}»?`}
         open={deleting !== null}
         onOpenChange={(open) => !open && setDeleting(null)}
         onConfirm={() => api.deleteCourier(deleting!.id)}
-        onDone={reload}
+        onDone={refresh}
       />
     </div>
   )
@@ -103,7 +104,7 @@ function CourierDialog({
   onClose: () => void
   onSaved: () => void
 }) {
-  const { options } = useLive()
+  const { options } = useApp()
   const [form, setForm] = useState<CourierForm>({ name: '', phone: '', district: '', capacity: '3' })
   const [errors, setErrors] = useState<Record<string, string>>({})
   const existing = courier !== 'new' ? courier : null

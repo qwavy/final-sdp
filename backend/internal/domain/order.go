@@ -67,8 +67,6 @@ type Order struct {
 	History         []StatusChange `json:"history"`
 	CreatedAt       time.Time      `json:"createdAt"`
 	UpdatedAt       time.Time      `json:"updatedAt"`
-
-	events []Event // события, которые ещё не опубликованы
 }
 
 // NextStatuses — куда можно перевести заказ сейчас (правила задаёт способ доставки).
@@ -95,7 +93,6 @@ func (o *Order) AssignCourier(c *Courier, now time.Time) error {
 		return err
 	}
 	o.CourierID = c.ID
-	o.record(CourierAssigned{OrderID: o.ID, CourierID: c.ID, At: now})
 	o.moveTo(StatusAssigned, now)
 	return nil
 }
@@ -133,23 +130,12 @@ func (o *Order) ApplyEdit(edited *Order, now time.Time) error {
 	o.PriceLines = edited.PriceLines
 	o.Price = edited.Price
 	o.UpdatedAt = now
-	o.record(OrderUpdated{OrderID: o.ID, At: now})
 	return nil
 }
-
-// PullEvents отдаёт накопленные события и очищает список.
-func (o *Order) PullEvents() []Event {
-	events := o.events
-	o.events = nil
-	return events
-}
-
-func (o *Order) record(e Event) { o.events = append(o.events, e) }
 
 func (o *Order) moveTo(to OrderStatus, now time.Time) {
 	from := o.Status
 	o.Status = to
 	o.UpdatedAt = now
 	o.History = append(o.History, StatusChange{From: from, To: to, At: now})
-	o.record(OrderStatusChanged{OrderID: o.ID, From: from, To: to, At: now})
 }

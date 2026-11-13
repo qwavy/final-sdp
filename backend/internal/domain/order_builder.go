@@ -138,7 +138,6 @@ func (b *OrderBuilder) Build(now time.Time) (*Order, error) {
 	o.Status = StatusCreated
 	o.History = []StatusChange{{To: StatusCreated, At: now}}
 	o.CreatedAt, o.UpdatedAt = now, now
-	o.record(OrderCreated{OrderID: o.ID, At: now})
 	return &o, nil
 }
 

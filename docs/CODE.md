@@ -17,17 +17,17 @@ backend/
     application/
       facade.go      ← Facade: единственный вход для HTTP
       port/          ← интерфейсы «что нам нужно снаружи»
-      events/        ← Observer: шина событий и подписчики
+      events/        ← Observer: Publisher и наблюдатели
       use_cases/
         command/     ← команды: меняют данные
         query/       ← запросы: только читают
     adapters/
-      in/http/       ← REST API и поток событий в браузер
+      in/http/       ← REST API
       out/storage/   ← хранение в JSON-файлах
       out/notify/    ← SMS-шлюз (Adapter)
 frontend/src/
   lib/api.ts         ← все запросы к серверу
-  lib/live.tsx       ← подписка на события сервера, автообновление
+  lib/app.tsx        ← общее состояние: справочники и обновление таблиц
   pages/             ← экраны: заказы, клиенты, курьеры, журнал, отчёт
   components/ui/     ← готовые компоненты shadcn
 ```
@@ -54,22 +54,18 @@ api.changeStatus(id, "in_transit")
                                   DeliveryFacade.ChangeOrderStatus(id, status)
                                      │
                                      ├─► command.OrderCommands.ChangeStatus
-                                     │     1. orders.Get(id)          ← из JSON-файла
-                                     │     2. order.ChangeStatus(...)  ← domain проверяет правило
-                                     │        и записывает событие OrderStatusChanged
-                                     │     3. orders.Save(order)       ← в JSON-файл
-                                     │     4. bus.Publish(события)     ← Observer
-                                     │           ├─ ActivityRecorder  → запись в журнал
-                                     │           ├─ CustomerNotifier  → SMS через адаптер
-                                     │           └─ EventStream ───────────────┐
-                                     │                                         │
-                                     └─► query.OrderQueries.Get(id)            │
-                                           собирает OrderView с именами        │
-  ◄──────────── 200 OK + JSON заказа ──────┘                                   │
-                                                                               │
-EventSource('/api/events') ◄──── "data: {...}" ────────────────────────────────┘
-  → toast «Заказ …: В пути»
-  → version++ → все таблицы перезагружаются
+                                     │     1. orders.Get(id)           ← из JSON-файла
+                                     │     2. order.ChangeStatus(...)   ← domain проверяет правило
+                                     │     3. orders.Save(order)        ← в JSON-файл
+                                     │     4. publisher.Notify(event)   ← Observer
+                                     │           ├─ ActivityRecorder → запись в журнал
+                                     │           └─ CustomerNotifier → SMS через адаптер
+                                     │
+                                     └─► query.OrderQueries.Get(id)
+                                           собирает OrderView с именами
+  ◄──────────── 200 OK + JSON заказа ──────┘
+  → уведомление «Заказ …: В пути»
+  → refresh() → все таблицы перезагружают данные
 ```
 
 Если правило нарушено (например, «Создан» → «Выдан»), на шаге 2 domain вернёт ошибку,
@@ -81,32 +77,31 @@ EventSource('/api/events') ◄──── "data: {...}" ───────�
 
 | Файл | Что внутри |
 |---|---|
-| `order.go` | `Order`, статусы, методы `AssignCourier`, `ChangeStatus`, `ApplyEdit`, `PullEvents` |
+| `order.go` | `Order`, статусы, методы `AssignCourier`, `ChangeStatus`, `ApplyEdit` |
 | `order_builder.go` | **Builder**: `OrderBuilder` и вся проверка полей заказа |
 | `delivery.go` | **Factory Method**: способы доставки и их правила статусов |
 | `pricing.go` | **Strategy**: способы расчёта цены |
 | `price.go` | **Decorator**: базовая цена + доп. услуги; функция `BuildPrice` |
 | `courier_selection.go` | **Strategy**: способы выбора курьера |
 | `customer.go`, `courier.go`, `pickup_point.go` | остальные сущности и их проверки |
-| `events.go` | доменные события |
 | `errors.go` | виды ошибок: `ValidationError`, `NotFound`, `RuleViolation`, `InvalidTransition` |
 | `geo.go` | районы, координаты, расстояние от склада |
 | `common.go` | `Money`, генерация ID, нормализация телефона |
 
-### Order и события
+### Order
 
-У заказа есть скрытое поле `events []Event`. Когда что-то меняется, метод добавляет туда
-событие (`o.record(...)`). Сохранять или рассылать события — не задача домена:
-это делает команда, вызывая `order.PullEvents()` после сохранения.
+Заказ сам меняет своё состояние и проверяет правила. Например, смена статуса:
 
 ```go
 func (o *Order) moveTo(to OrderStatus, now time.Time) {
     from := o.Status
     o.Status = to
+    o.UpdatedAt = now
     o.History = append(o.History, StatusChange{From: from, To: to, At: now})
-    o.record(OrderStatusChanged{OrderID: o.ID, From: from, To: to, At: now})
 }
 ```
+
+Domain не знает ни о журнале, ни об SMS — об этом заботится команда (см. Observer ниже).
 
 ### Как проверяются переходы статусов
 
@@ -137,7 +132,7 @@ order, err := domain.NewOrderBuilder().
 Каждый метод только запоминает значение и возвращает `b` — поэтому их можно вызывать цепочкой.
 Вся проверка — в `Build()`: собирает **все** ошибки в `ValidationError` и возвращает их
 вместе (форма подсвечивает все поля сразу). Если ошибок нет — считает расстояние, цену,
-ставит статус «Создан» и событие `OrderCreated`.
+ставит статус «Создан».
 
 `Invalid(field, msg)` — чтобы снаружи добавить ошибку, которую домен проверить не может
 (например, «клиент не найден» — для этого нужно хранилище).
@@ -235,36 +230,41 @@ type Notifier interface { Notify(n Notification) error }
 Реализации — в `adapters/out`. `[T any]` — дженерик: один интерфейс для заказов,
 клиентов, курьеров.
 
-### events — Bus (Observer)
+### events — Observer
 
 ```go
-type Subscriber interface {             // Observer
-    Handle(e domain.Event)
+type Event struct {                     // что произошло
+    Type    Type                        // "order.status_changed" и т.д.
+    OrderID string
+    Message string
+    At      time.Time
 }
 
-type Bus struct {                       // Subject
-    mu          sync.RWMutex
-    subscribers []Subscriber
+type Observer interface {               // Observer
+    Update(e Event)
 }
 
-func (b *Bus) Subscribe(s Subscriber)   // добавить наблюдателя
-func (b *Bus) Publish(events ...domain.Event) {
-    // каждому подписчику — каждое событие
+type Publisher struct {                 // Subject
+    observers []Observer
+}
+
+func (p *Publisher) Subscribe(o Observer) { p.observers = append(p.observers, o) }
+
+func (p *Publisher) Notify(e Event) {
+    for _, o := range p.observers {
+        o.Update(e)
+    }
 }
 ```
 
-- **Что такое Bus:** «доска объявлений». Команды вешают событие, все подписчики его получают.
-  Команда не знает, сколько подписчиков и что они делают.
-- **`sync.RWMutex`:** защита от одновременного доступа — HTTP-сервер обрабатывает запросы
-  параллельно. При `Publish` список копируется под блокировкой, а рассылка идёт уже без неё.
-- **Подписчики** (`subscribers.go`):
+- **Как работает:** `Publisher` хранит список наблюдателей. Команда после изменения заказа
+  вызывает `Notify`, и каждый наблюдатель получает событие. Команда не знает,
+  сколько наблюдателей и что они делают.
+- **Наблюдатели** (`subscribers.go`):
   - `ActivityRecorder` — пишет каждое событие в журнал.
   - `CustomerNotifier` — реагирует только на `OrderStatusChanged`, находит клиента
     и отправляет SMS через `port.Notifier`. Результат (успех или ошибка) тоже пишет в журнал.
-  - `EventStream` (в `adapters/in/http/events.go`) — пересылает событие в браузер.
-- **Где подписываются:** `cmd/server/main.go`.
-- `Describe(e)` — превращает событие в текст для журнала и уведомлений
-  (`switch e.(type)` — проверка конкретного типа события).
+- **Где подписываются:** `cmd/server/main.go`, один раз при запуске.
 
 ### use_cases/command — команды
 
@@ -275,7 +275,7 @@ func (b *Bus) Publish(events ...domain.Event) {
 1. достать объект из репозитория;
 2. вызвать метод домена (он проверит правила);
 3. сохранить;
-4. опубликовать события.
+4. оповестить наблюдателей (`c.notify(...)` → `publisher.Notify`).
 
 ```go
 func (c *OrderCommands) AssignCourier(id, selectorCode string) error {
@@ -285,7 +285,9 @@ func (c *OrderCommands) AssignCourier(id, selectorCode string) error {
     courier, _ := selector.Select(order, couriers)
     order.AssignCourier(courier, c.now())                     // правило в домене
     c.couriers.Save(courier)
-    return c.saveAndPublish(order)                            // сохранить + Observer
+    c.orders.Save(order)
+    c.notify(events.OrderStatusChanged, id, "...")            // Observer
+    return nil
 }
 ```
 (в настоящем коде после каждого шага проверяется `err`.)
@@ -330,27 +332,22 @@ func (f *DeliveryFacade) ChangeOrderStatus(orderID, status string) (query.OrderV
 | `router.go` | список маршрутов (`mux.Handle("POST /api/orders", ...)`), раздача собранного фронтенда, лог запросов |
 | `handlers.go` | обработчики: прочитать запрос → вызвать фасад → записать ответ |
 | `respond.go` | `writeJSON`, `readJSON`, `writeError` (выбор HTTP-кода по виду ошибки) |
-| `events.go` | `EventStream` — подписчик шины и одновременно HTTP-обработчик `/api/events` |
 
 - **Маршруты** вида `"GET /api/orders/{id}"` — встроенная возможность `net/http` с Go 1.22.
   `r.PathValue("id")` достаёт `{id}` из пути.
 - **`apiFunc`** — обработчик, который возвращает `error`. Если ошибка есть, `ServeHTTP`
   сам вызывает `writeError`. Так в обработчиках нет повторяющегося кода ответа об ошибке.
-- **SSE (Server-Sent Events)** — браузер открывает одно долгое соединение `/api/events`,
-  сервер пишет туда строки `data: {...}`. У каждого открытого браузера свой канал `chan []byte`;
-  `Handle` кладёт событие во все каналы. Каждые 25 секунд уходит `ping`, чтобы соединение не рвалось.
 - **`spaHandler`** — отдаёт файлы из `frontend/dist`, а на неизвестные пути — `index.html`.
 
 ### out/storage — хранилище
 
 - `Collection[T]` (`collection.go`) — один JSON-файл = один тип сущностей.
-  В памяти хранит **JSON каждой записи** (`map[id]json.RawMessage`), а не сами объекты.
-  Поэтому `Get` каждый раз возвращает **новую копию**: если изменить объект и не вызвать `Save`,
+  В памяти — обычная `map[id]T`. При запуске файл читается, после каждого `Save` / `Delete`
+  перезаписывается целиком.
+- `Get` и `List` возвращают **копии**: если изменить объект и не вызвать `Save`,
   в хранилище ничего не поменяется.
-- `Save` сначала меняет память, потом пишет файл; если запись не удалась — откатывает память.
-- `writeFileAtomic` пишет во временный файл и переименовывает его — файл не останется
-  наполовину записанным при сбое.
-- `sync.Mutex` — защищает от одновременной записи из разных запросов.
+- `sync.Mutex` — сервер обрабатывает запросы параллельно, мьютекс не даёт двум запросам
+  одновременно менять `map`.
 - `Store` (`store.go`) открывает все файлы: `orders.json`, `customers.json`, `couriers.json`,
   `pickup_points.json`, `activity.json`; `ExportFolder` сохраняет отчёты в `exports/`.
 
@@ -385,11 +382,10 @@ func (a *SmsNotifier) Notify(n port.Notification) error {
 
 ```go
 store := storage.Open(dataDir)                       // 1. хранилище
-bus := events.NewBus()                               // 2. шина событий
+publisher := events.NewPublisher()                   // 2. Observer
 sms := notify.NewSmsNotifier(...)                    // 3. адаптер SMS
-bus.Subscribe(events.NewActivityRecorder(...))       // 4. подписчики (Observer)
-bus.Subscribe(events.NewCustomerNotifier(..., sms, ...))
-bus.Subscribe(stream)
+publisher.Subscribe(events.NewActivityRecorder(...)) // 4. наблюдатели
+publisher.Subscribe(events.NewCustomerNotifier(..., sms, ...))
 facade := application.NewDeliveryFacade(Deps{...})  // 5. фасад
 if store.IsEmpty() { seed(facade, store) }           // 6. тестовые данные
 http.Server{Handler: httpadapter.NewRouter(...)}     // 7. HTTP
@@ -407,7 +403,7 @@ http.Server{Handler: httpadapter.NewRouter(...)}     // 7. HTTP
 | Файл | Что делает |
 |---|---|
 | `lib/api.ts` | типы данных (как в JSON сервера) и функции запросов; `ApiError` с ошибками по полям |
-| `lib/live.tsx` | `LiveProvider`: загружает справочники, подписывается на `/api/events`, показывает уведомления, увеличивает `version`; хук `useLoad` перезагружает данные при каждом событии |
+| `lib/app.tsx` | `AppProvider`: загружает справочники для форм и хранит счётчик `version`. После любого действия вызывается `refresh()`, и хук `useLoad` заново загружает данные во всех таблицах |
 | `pages/orders/OrdersPage.tsx` | таблица заказов, поиск, фильтр по статусу |
 | `pages/orders/OrderForm.tsx` | форма заказа; живой расчёт цены через `/api/orders/quote` (с задержкой 250 мс) |
 | `pages/orders/OrderDetails.tsx` | карточка заказа: цена, история, кнопки действий |
@@ -445,7 +441,7 @@ cd backend && go test ./... -v
 | **Новая стратегия курьера** (например, «по алфавиту») | В `domain/courier_selection.go`: тип с `Select` → добавить в `courierSelectors`. |
 | **Новая доп. услуга** (например, «подарочная упаковка +300 ₸») | В `domain/price.go`: тип-обёртка с `inner`, `Total`, `Lines` → запись в `extras` (до `express`). |
 | **Новый способ доставки** (например, «самовывоз со склада») | В `domain/delivery.go`: новый продукт + новый `Creator` → добавить в `deliveryTypes` и `deliveryCreators`. |
-| **Новый подписчик** (например, «писать в консоль») | Тип с методом `Handle(e domain.Event)` → `bus.Subscribe(...)` в `main.go`. |
+| **Новый наблюдатель** (например, «писать в консоль») | Тип с методом `Update(e events.Event)` → `publisher.Subscribe(...)` в `main.go`. |
 | **Новый канал уведомлений** (email) | В `adapters/out/notify`: тип с `Notify(port.Notification) error` → передать его вместо `sms` в `main.go`. |
 | **Новое правило** (например, «вес не больше 40 кг для двери») | Поменять `MaxWeightKg()` у `doorDelivery` в `delivery.go`. |
 | **Новое поле в форме** | `domain.Order` + `OrderBuilder` → `command.OrderInput` → `frontend/src/lib/api.ts` → `OrderForm.tsx`. |

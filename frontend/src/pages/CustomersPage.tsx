@@ -8,11 +8,12 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { Input } from '@/components/ui/input'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { ApiError, api, errorMessage, type Customer, type CustomerInput } from '@/lib/api'
-import { useLoad } from '@/lib/live'
+import { useApp, useLoad } from '@/lib/app'
 import { ConfirmDelete } from './ConfirmDelete'
 
 export function CustomersPage() {
-  const { data: customers, reload } = useLoad(api.customers, [])
+  const { refresh } = useApp()
+  const { data: customers } = useLoad(api.customers, [])
   const [editing, setEditing] = useState<Customer | 'new' | null>(null)
   const [deleting, setDeleting] = useState<Customer | null>(null)
 
@@ -61,13 +62,13 @@ export function CustomersPage() {
         </CardContent>
       </Card>
 
-      <CustomerDialog customer={editing} onClose={() => setEditing(null)} onSaved={reload} />
+      <CustomerDialog customer={editing} onClose={() => setEditing(null)} onSaved={refresh} />
       <ConfirmDelete
         title={`Удалить клиента «${deleting?.name}»?`}
         open={deleting !== null}
         onOpenChange={(open) => !open && setDeleting(null)}
         onConfirm={() => api.deleteCustomer(deleting!.id)}
-        onDone={reload}
+        onDone={refresh}
       />
     </div>
   )

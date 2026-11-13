@@ -1,7 +1,7 @@
 // Package application — ПАТТЕРН FACADE.
 //
 // Facade     — DeliveryFacade: единственная точка входа для интерфейса (HTTP).
-// Subsystem  — команды (command), запросы (query), репозитории, шина событий.
+// Subsystem  — команды (command), запросы (query), репозитории, наблюдатели.
 //
 // HTTP-обработчик вызывает один метод, например CreateOrder, а фасад внутри
 // выполняет команду, затем запрос для показа результата. Интерфейс не знает
@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"time"
 
+	"parcelhub/internal/application/events"
 	"parcelhub/internal/application/port"
 	"parcelhub/internal/application/use_cases/command"
 	"parcelhub/internal/application/use_cases/query"
@@ -26,7 +27,7 @@ type Deps struct {
 	PickupPoints port.PickupPointRepository
 	Activity     port.ActivityRepository
 	Exports      port.ExportStore
-	Events       port.EventPublisher
+	Events       *events.Publisher
 	Clock        func() time.Time
 }
 

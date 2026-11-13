@@ -63,12 +63,12 @@ backend/
     application/
       facade.go            Facade — единая точка входа для HTTP
       port/                интерфейсы хранилища и уведомлений
-      events/              Observer — шина событий и подписчики
+      events/              Observer — Publisher и наблюдатели
       use_cases/
         command/           команды: меняют данные (CQS)
         query/             запросы: только читают данные (CQS)
     adapters/
-      in/http/             REST API + поток событий (SSE) в браузер
+      in/http/             REST API
       out/storage/         JSON-файлы
       out/notify/          Adapter — SMS-шлюз
 frontend/                  React + TypeScript + shadcn/ui
@@ -87,7 +87,7 @@ Domain не знает ни о HTTP, ни о файлах.
 | Facade | структурный | HTTP не должен знать о командах, запросах и хранилище | `application.DeliveryFacade` | Любой обработчик в `adapters/in/http/handlers.go` вызывает один метод фасада |
 | Adapter | структурный | Сторонний SMS-шлюз имеет несовместимый интерфейс | `port.Notifier` ← `notify.SmsNotifier` → `notify.SmsGatewayClient` | Сменить статус — запись в `data/sms_outbox.jsonl` и в журнале |
 | Strategy | поведенческий | Пользователь выбирает способ расчёта цены и способ выбора курьера | `PricingStrategy` (`WeightPricing`, `DistancePricing`), `CourierSelector` (`Nearest…`, `LeastLoaded…`) | В форме две цены рядом; в заказе выбор «Ближайший / Наименее загруженный» |
-| Observer | поведенческий | Смена статуса должна вызывать несколько независимых реакций | `events.Bus`, `Subscriber`, `ActivityRecorder`, `CustomerNotifier`, `http.EventStream` | Сменить статус — всплывает уведомление, обновляются таблицы, пишется журнал и SMS |
+| Observer | поведенческий | Смена статуса должна вызывать несколько независимых реакций | `events.Publisher`, `Observer`, `ActivityRecorder`, `CustomerNotifier` | Сменить статус — в журнале появляются событие и SMS, строка в `data/sms_outbox.jsonl` |
 
 ## API (кратко)
 
@@ -103,7 +103,6 @@ Domain не знает ни о HTTP, ни о файлах.
 | GET | `/api/pickup-points`, `/api/activity` | точки выдачи, журнал |
 | GET | `/api/reports/daily?date=` | отчёт за день |
 | GET | `/api/reports/daily/export?format=csv\|json` | выгрузка (копия в `data/exports`) |
-| GET | `/api/events` | поток событий (SSE) |
 
 Ошибки: `422` — ошибки ввода по полям, `404` — не найдено, `409` — нарушено правило
 (например, недопустимая смена статуса), `400` — некорректный запрос.

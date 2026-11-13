@@ -1,4 +1,4 @@
-// Package http — входной адаптер: REST API и поток событий для браузера.
+// Package http — входной адаптер: REST API для браузера.
 // Обработчики только разбирают запрос и вызывают DeliveryFacade.
 package http
 
@@ -18,7 +18,7 @@ type api struct {
 }
 
 // NewRouter собирает все маршруты. staticDir — собранный фронтенд (если есть).
-func NewRouter(facade *application.DeliveryFacade, stream *EventStream, staticDir string) http.Handler {
+func NewRouter(facade *application.DeliveryFacade, staticDir string) http.Handler {
 	a := &api{facade: facade}
 	mux := http.NewServeMux()
 
@@ -48,7 +48,6 @@ func NewRouter(facade *application.DeliveryFacade, stream *EventStream, staticDi
 	mux.Handle("GET /api/reports/daily", apiFunc(a.dailyReport))
 	mux.Handle("GET /api/reports/daily/export", apiFunc(a.exportDailyReport))
 
-	mux.Handle("GET /api/events", stream)
 	mux.Handle("/api/", apiFunc(func(http.ResponseWriter, *http.Request) error {
 		return errNotFoundRoute
 	}))
@@ -76,7 +75,7 @@ func logRequests(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		next.ServeHTTP(w, r)
-		if strings.HasPrefix(r.URL.Path, "/api/") && r.URL.Path != "/api/events" {
+		if strings.HasPrefix(r.URL.Path, "/api/") {
 			slog.Info("http", "method", r.Method, "path", r.URL.Path, "took", time.Since(start).Round(time.Microsecond))
 		}
 	})

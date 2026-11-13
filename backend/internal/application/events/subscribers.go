@@ -8,24 +8,6 @@ import (
 	"parcelhub/internal/domain"
 )
 
-// Describe — понятный человеку текст события.
-func Describe(e domain.Event) string {
-	switch ev := e.(type) {
-	case domain.OrderCreated:
-		return fmt.Sprintf("Заказ %s создан", ev.OrderID)
-	case domain.OrderUpdated:
-		return fmt.Sprintf("Заказ %s изменён", ev.OrderID)
-	case domain.OrderDeleted:
-		return fmt.Sprintf("Заказ %s удалён", ev.OrderID)
-	case domain.CourierAssigned:
-		return fmt.Sprintf("На заказ %s назначен курьер %s", ev.OrderID, ev.CourierID)
-	case domain.OrderStatusChanged:
-		return fmt.Sprintf("Заказ %s: «%s» → «%s»", ev.OrderID, ev.From.Title(), ev.To.Title())
-	default:
-		return e.EventName()
-	}
-}
-
 // ActivityRecorder записывает каждое событие в журнал.
 type ActivityRecorder struct {
 	activity port.ActivityRepository
@@ -35,15 +17,15 @@ func NewActivityRecorder(activity port.ActivityRepository) *ActivityRecorder {
 	return &ActivityRecorder{activity: activity}
 }
 
-func (r *ActivityRecorder) Handle(e domain.Event) {
+func (r *ActivityRecorder) Update(e Event) {
 	err := r.activity.Append(port.ActivityEntry{
-		At:      e.OccurredAt(),
-		Kind:    e.EventName(),
-		OrderID: e.AggregateID(),
-		Message: Describe(e),
+		At:      e.At,
+		Kind:    string(e.Type),
+		OrderID: e.OrderID,
+		Message: e.Message,
 	})
 	if err != nil {
-		slog.Error("не удалось записать событие в журнал", "event", e.EventName(), "err", err)
+		slog.Error("не удалось записать событие в журнал", "err", err)
 	}
 }
 
@@ -66,14 +48,13 @@ func NewCustomerNotifier(
 	return &CustomerNotifier{orders, customers, pickupPoints, notifier, activity}
 }
 
-func (n *CustomerNotifier) Handle(e domain.Event) {
-	changed, ok := e.(domain.OrderStatusChanged)
-	if !ok {
+func (n *CustomerNotifier) Update(e Event) {
+	if e.Type != OrderStatusChanged {
 		return
 	}
-	order, err := n.orders.Get(changed.OrderID)
+	order, err := n.orders.Get(e.OrderID)
 	if err != nil {
-		slog.Error("уведомление: заказ не найден", "order", changed.OrderID, "err", err)
+		slog.Error("уведомление: заказ не найден", "order", e.OrderID, "err", err)
 		return
 	}
 	customer, err := n.customers.Get(order.CustomerID)
@@ -84,7 +65,7 @@ func (n *CustomerNotifier) Handle(e domain.Event) {
 
 	text := n.message(order)
 	entry := port.ActivityEntry{
-		At:      changed.At,
+		At:      e.At,
 		Kind:    "sms.sent",
 		OrderID: order.ID,
 		Message: fmt.Sprintf("SMS на %s: %s", customer.Phone, text),

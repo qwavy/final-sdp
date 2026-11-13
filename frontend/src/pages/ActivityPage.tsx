@@ -3,7 +3,7 @@ import { EmptyState } from '@/components/common'
 import { Card, CardContent } from '@/components/ui/card'
 import { api } from '@/lib/api'
 import { dateTime } from '@/lib/format'
-import { useLoad } from '@/lib/live'
+import { useLoad } from '@/lib/app'
 
 // Журнал заполняют наблюдатели (Observer) на сервере:
 // ActivityRecorder пишет каждое событие, CustomerNotifier — отправленные SMS.
