@@ -65,16 +65,17 @@ func (c *OrderCommands) Update(id string, in OrderInput) error {
 		return err
 	}
 	if !order.CanEdit() {
-		return domain.RuleViolation("изменять можно только заказ в статусе «%s»", domain.StatusCreated.Title())
+		return domain.RuleViolation("изменять можно только новый заказ")
 	}
+	// Собираем заказ заново через Builder и сохраняем под старым ID.
 	edited, err := c.build(in)
 	if err != nil {
 		return err
 	}
-	if err := order.ApplyEdit(edited, c.now()); err != nil {
-		return err
-	}
-	if err := c.orders.Save(order); err != nil {
+	edited.ID = order.ID
+	edited.CreatedAt = order.CreatedAt
+	edited.History = order.History
+	if err := c.orders.Save(edited); err != nil {
 		return err
 	}
 	c.notify(events.OrderUpdated, id, fmt.Sprintf("Заказ %s изменён", id))
@@ -101,9 +102,6 @@ func (c *OrderCommands) AssignCourier(id, selectorCode string) error {
 	order, err := c.orders.Get(id)
 	if err != nil {
 		return err
-	}
-	if !order.CanAssign() {
-		return domain.InvalidTransition(order.Status, domain.StatusAssigned)
 	}
 	selector, err := domain.CourierSelectorByCode(selectorCode)
 	if err != nil {

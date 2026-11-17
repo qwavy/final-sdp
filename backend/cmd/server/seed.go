@@ -23,10 +23,7 @@ func seed(f *application.DeliveryFacade, store *storage.Store) error {
 	}
 	pointIDs := map[string]string{}
 	for _, p := range points {
-		point, err := domain.NewPickupPoint(p.name, p.address, p.district, p.kind)
-		if err != nil {
-			return err
-		}
+		point := domain.NewPickupPoint(p.name, p.address, p.district, p.kind)
 		if err := store.PickupPoints.Save(point); err != nil {
 			return err
 		}

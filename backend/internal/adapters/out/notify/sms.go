@@ -1,112 +1,75 @@
 // Package notify — ПАТТЕРН ADAPTER.
 //
-// Target  — port.Notifier: Notify(Notification) error. Этого интерфейса ждёт приложение.
-// Adaptee — SmsGatewayClient: «сторонний SDK» SMS-шлюза со своим неудобным интерфейсом:
+// Target  — port.Notifier: Notify(Notification) error. Его ждёт приложение.
+// Adaptee — SmsGateway: «чужой» SMS-сервис со своим неудобным интерфейсом:
 //
-//	телефон без «+», текст до 160 символов, результат — числовой код вместо error.
+//	номер без «+», текст до 160 символов, результат — код (200, 400 …), а не error.
 //
-// Adapter — SmsNotifier: переводит наш вызов в вызов SDK и код ответа в error.
-//
-// Приложение (CustomerNotifier) ничего не знает о шлюзе. Чтобы перейти на другой
-// сервис (email, Telegram), достаточно написать ещё один адаптер под port.Notifier.
+// Adapter — SmsNotifier: переводит наш вызов в вызов шлюза, а код — в error.
 package notify
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
-	"sync"
 	"time"
 	"unicode/utf8"
 
 	"parcelhub/internal/application/port"
 )
 
-// --- Adaptee: имитация стороннего SDK. Его код мы «не можем менять». ---
+// --- Adaptee: «чужой» сервис, его код мы не меняем ---
 
-const (
-	GatewayOK            = 200
-	GatewayBadNumber     = 400
-	GatewayTooLong       = 413
-	GatewayUnavailable   = 503
-	gatewayMaxBodyLength = 160
-)
-
-// SmsGatewayClient вместо реальной отправки дописывает сообщение в файл-«outbox».
-type SmsGatewayClient struct {
-	mu         sync.Mutex
-	outboxPath string
-	counter    int
+// SmsGateway вместо настоящей отправки дописывает SMS в файл.
+type SmsGateway struct {
+	OutboxFile string
 }
 
-func NewSmsGatewayClient(outboxPath string) *SmsGatewayClient {
-	return &SmsGatewayClient{outboxPath: outboxPath}
-}
-
-// SendSMS — API шлюза: msisdn — только цифры (77011234567), body — до 160 символов.
-func (g *SmsGatewayClient) SendSMS(msisdn, sender, body string) (statusCode int, messageID string) {
-	if len(msisdn) != 11 || strings.Trim(msisdn, "0123456789") != "" {
-		return GatewayBadNumber, ""
+// Send: number — только цифры (77011234567), text — до 160 символов.
+// Возвращает 200 — отправлено, 400 — плохой номер, 413 — длинный текст, 503 — ошибка.
+func (g *SmsGateway) Send(number, text string) int {
+	if len(number) != 11 || strings.Trim(number, "0123456789") != "" {
+		return 400
 	}
-	if utf8.RuneCountInString(body) > gatewayMaxBodyLength {
-		return GatewayTooLong, ""
+	if utf8.RuneCountInString(text) > 160 {
+		return 413
 	}
-
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	g.counter++
-	messageID = fmt.Sprintf("sms-%d-%d", time.Now().Unix(), g.counter)
-
-	line, _ := json.Marshal(map[string]string{
-		"id": messageID, "to": msisdn, "from": sender, "body": body, "sentAt": time.Now().Format(time.RFC3339),
-	})
-	f, err := os.OpenFile(g.outboxPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	line := fmt.Sprintf("%s  to=%s  %s\n", time.Now().Format(time.DateTime), number, text)
+	f, err := os.OpenFile(g.OutboxFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
-		return GatewayUnavailable, ""
+		return 503
 	}
 	defer f.Close()
-	if _, err := f.Write(append(line, '\n')); err != nil {
-		return GatewayUnavailable, ""
+	if _, err := f.WriteString(line); err != nil {
+		return 503
 	}
-	return GatewayOK, messageID
+	return 200
 }
 
 // --- Adapter ---
 
-// SmsNotifier реализует port.Notifier поверх SmsGatewayClient.
+// SmsNotifier реализует port.Notifier поверх SmsGateway.
 type SmsNotifier struct {
-	gateway *SmsGatewayClient
-	sender  string
+	gateway *SmsGateway
 }
 
-func NewSmsNotifier(gateway *SmsGatewayClient, sender string) *SmsNotifier {
-	return &SmsNotifier{gateway: gateway, sender: sender}
+func NewSmsNotifier(gateway *SmsGateway) *SmsNotifier {
+	return &SmsNotifier{gateway: gateway}
 }
-
-var _ port.Notifier = (*SmsNotifier)(nil)
 
 func (a *SmsNotifier) Notify(n port.Notification) error {
-	msisdn := strings.TrimPrefix(n.Phone, "+") // +77011234567 → 77011234567
-	body := truncate(n.Text, gatewayMaxBodyLength)
+	number := strings.TrimPrefix(n.Phone, "+") // +77011234567 → 77011234567
+	text := n.Text
+	if runes := []rune(text); len(runes) > 160 {
+		text = string(runes[:160]) // обрезаем под лимит шлюза
+	}
 
-	code, _ := a.gateway.SendSMS(msisdn, a.sender, body)
-	switch code {
-	case GatewayOK:
+	switch a.gateway.Send(number, text) {
+	case 200:
 		return nil
-	case GatewayBadNumber:
+	case 400:
 		return fmt.Errorf("шлюз не принял номер %s", n.Phone)
-	case GatewayTooLong:
-		return fmt.Errorf("сообщение слишком длинное")
 	default:
-		return fmt.Errorf("SMS-шлюз недоступен (код %d)", code)
+		return fmt.Errorf("SMS-шлюз недоступен")
 	}
-}
-
-func truncate(s string, maxRunes int) string {
-	if utf8.RuneCountInString(s) <= maxRunes {
-		return s
-	}
-	runes := []rune(s)
-	return string(runes[:maxRunes-1]) + "…"
 }

@@ -2,41 +2,29 @@ package domain
 
 import "math"
 
-// Location — точка на упрощённой карте города (координаты в км).
-type Location struct {
-	X float64 `json:"x"`
-	Y float64 `json:"y"`
-}
-
-func (a Location) DistanceTo(b Location) float64 {
-	return math.Round(math.Hypot(a.X-b.X, a.Y-b.Y)*10) / 10
-}
-
-// District — район города. Используется для расчёта расстояния.
+// District — район города с координатами на упрощённой карте (в км).
 type District struct {
-	Code     string   `json:"code"`
-	Name     string   `json:"name"`
-	Location Location `json:"-"`
+	Code string
+	Name string
+	X, Y float64
 }
 
-// HubLocation — сортировочный склад, откуда уезжают все посылки.
-var HubLocation = Location{X: 0, Y: 2}
-
-var districts = []District{
-	{Code: "almaly", Name: "Алмалинский", Location: Location{0, 0}},
-	{Code: "bostandyk", Name: "Бостандыкский", Location: Location{-2, -5}},
-	{Code: "medeu", Name: "Медеуский", Location: Location{4, -3}},
-	{Code: "auezov", Name: "Ауэзовский", Location: Location{-7, -1}},
-	{Code: "alatau", Name: "Алатауский", Location: Location{-9, 6}},
-	{Code: "turksib", Name: "Турксибский", Location: Location{3, 8}},
-	{Code: "zhetysu", Name: "Жетысуский", Location: Location{-1, 6}},
-	{Code: "nauryzbay", Name: "Наурызбайский", Location: Location{-14, -6}},
+var Districts = []District{
+	{"almaly", "Алмалинский", 0, 0},
+	{"bostandyk", "Бостандыкский", -2, -5},
+	{"medeu", "Медеуский", 4, -3},
+	{"auezov", "Ауэзовский", -7, -1},
+	{"alatau", "Алатауский", -9, 6},
+	{"turksib", "Турксибский", 3, 8},
+	{"zhetysu", "Жетысуский", -1, 6},
+	{"nauryzbay", "Наурызбайский", -14, -6},
 }
 
-func Districts() []District { return append([]District(nil), districts...) }
+// Склад, откуда уезжают все посылки.
+const hubX, hubY = 0.0, 2.0
 
 func FindDistrict(code string) (District, bool) {
-	for _, d := range districts {
+	for _, d := range Districts {
 		if d.Code == code {
 			return d, true
 		}
@@ -45,20 +33,24 @@ func FindDistrict(code string) (District, bool) {
 }
 
 // DistanceFromHub — расстояние от склада до района (не меньше 1 км).
-func DistanceFromHub(districtCode string) (float64, error) {
-	d, ok := FindDistrict(districtCode)
+func DistanceFromHub(code string) (float64, bool) {
+	d, ok := FindDistrict(code)
 	if !ok {
-		return 0, RuleViolation("неизвестный район %q", districtCode)
+		return 0, false
 	}
-	return max(1, HubLocation.DistanceTo(d.Location)), nil
+	return max(1, distance(hubX, hubY, d.X, d.Y)), true
 }
 
-// distanceBetween — расстояние между двумя районами (для выбора курьера).
-func distanceBetween(fromCode, toCode string) float64 {
+// DistanceBetween — расстояние между двумя районами.
+func DistanceBetween(fromCode, toCode string) float64 {
 	from, ok1 := FindDistrict(fromCode)
 	to, ok2 := FindDistrict(toCode)
 	if !ok1 || !ok2 {
 		return math.MaxFloat64
 	}
-	return from.Location.DistanceTo(to.Location)
+	return distance(from.X, from.Y, to.X, to.Y)
+}
+
+func distance(x1, y1, x2, y2 float64) float64 {
+	return math.Round(math.Hypot(x1-x2, y1-y2)*10) / 10
 }

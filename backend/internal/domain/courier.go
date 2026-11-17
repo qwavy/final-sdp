@@ -31,16 +31,15 @@ func (c *Courier) Update(name, phone, district string, capacity int) error {
 	name = strings.TrimSpace(name)
 	phone = NormalizePhone(phone)
 
-	var errs ValidationError
-	validateContact(&errs, name, phone)
+	errs := ValidationError{}
+	checkContact(errs, name, phone)
 	if _, ok := FindDistrict(district); !ok {
-		errs.Add("district", "выберите район")
+		errs["district"] = "выберите район"
 	}
-	switch {
-	case capacity < 1 || capacity > MaxCourierCapacity:
-		errs.Add("capacity", fmt.Sprintf("вместимость от 1 до %d заказов", MaxCourierCapacity))
-	case capacity < c.ActiveOrders:
-		errs.Add("capacity", fmt.Sprintf("не меньше текущих заказов (%d)", c.ActiveOrders))
+	if capacity < 1 || capacity > MaxCourierCapacity {
+		errs["capacity"] = fmt.Sprintf("от 1 до %d заказов", MaxCourierCapacity)
+	} else if capacity < c.ActiveOrders {
+		errs["capacity"] = fmt.Sprintf("не меньше текущих заказов (%d)", c.ActiveOrders)
 	}
 	if err := errs.OrNil(); err != nil {
 		return err

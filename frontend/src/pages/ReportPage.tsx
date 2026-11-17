@@ -37,33 +37,7 @@ export function ReportPage() {
             <Stat label="Средний чек" value={money(report.averagePrice)} />
           </div>
 
-          <div className="grid gap-4 md:grid-cols-2">
-            <Card>
-              <CardHeader>
-                <CardTitle>По способу доставки</CardTitle>
-              </CardHeader>
-              <CardContent className="grid gap-2 text-sm">
-                {report.byDelivery?.length ? (
-                  report.byDelivery.map((d) => (
-                    <div key={d.type} className="flex justify-between">
-                      <span>
-                        {d.title} <span className="text-muted-foreground">× {d.count}</span>
-                      </span>
-                      <span className="tabular-nums">{money(d.revenue)}</span>
-                    </div>
-                  ))
-                ) : (
-                  <span className="text-muted-foreground">Нет данных</span>
-                )}
-                <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 border-t pt-3 text-xs text-muted-foreground">
-                  {report.byStatus.map((s) => (
-                    <span key={s.status}>
-                      {s.title}: <b className="text-foreground">{s.count}</b>
-                    </span>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
+          <div className="grid gap-4">
             <Card>
               <CardHeader>
                 <CardTitle>Курьеры</CardTitle>

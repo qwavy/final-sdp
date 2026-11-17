@@ -16,6 +16,11 @@ const (
 	StatusCancelled     OrderStatus = "cancelled"
 )
 
+// Statuses — все статусы по порядку.
+var Statuses = []OrderStatus{
+	StatusCreated, StatusAssigned, StatusInTransit, StatusAtPickupPoint, StatusDelivered, StatusCancelled,
+}
+
 var statusTitles = map[OrderStatus]string{
 	StatusCreated:       "Создан",
 	StatusAssigned:      "Курьер назначен",
@@ -25,20 +30,7 @@ var statusTitles = map[OrderStatus]string{
 	StatusCancelled:     "Отменён",
 }
 
-var allStatuses = []OrderStatus{
-	StatusCreated, StatusAssigned, StatusInTransit, StatusAtPickupPoint, StatusDelivered, StatusCancelled,
-}
-
-func AllStatuses() []OrderStatus { return slices.Clone(allStatuses) }
-
-func (s OrderStatus) Title() string {
-	if t, ok := statusTitles[s]; ok {
-		return t
-	}
-	return string(s)
-}
-
-func (s OrderStatus) Valid() bool { _, ok := statusTitles[s]; return ok }
+func (s OrderStatus) Title() string { return statusTitles[s] }
 
 type StatusChange struct {
 	From OrderStatus `json:"from,omitempty"`
@@ -46,7 +38,7 @@ type StatusChange struct {
 	At   time.Time   `json:"at"`
 }
 
-// Order — заказ на доставку посылки. Создаётся только через OrderBuilder.
+// Order — заказ на доставку. Создаётся только через OrderBuilder.
 type Order struct {
 	ID              string         `json:"id"`
 	CustomerID      string         `json:"customerId"`
@@ -69,7 +61,7 @@ type Order struct {
 	UpdatedAt       time.Time      `json:"updatedAt"`
 }
 
-// NextStatuses — куда можно перевести заказ сейчас (правила задаёт способ доставки).
+// NextStatuses — куда можно перейти сейчас. Правила задаёт способ доставки (Factory Method).
 func (o *Order) NextStatuses() []OrderStatus {
 	method, err := NewDeliveryMethod(o.DeliveryType)
 	if err != nil {
@@ -78,64 +70,36 @@ func (o *Order) NextStatuses() []OrderStatus {
 	return method.NextStatuses(o.Status)
 }
 
-func (o *Order) canMoveTo(to OrderStatus) bool { return slices.Contains(o.NextStatuses(), to) }
-
 func (o *Order) IsFinal() bool   { return o.Status == StatusDelivered || o.Status == StatusCancelled }
 func (o *Order) CanEdit() bool   { return o.Status == StatusCreated }
 func (o *Order) CanDelete() bool { return o.Status == StatusCreated || o.IsFinal() }
-func (o *Order) CanAssign() bool { return o.canMoveTo(StatusAssigned) }
+func (o *Order) CanAssign() bool { return slices.Contains(o.NextStatuses(), StatusAssigned) }
 
 func (o *Order) AssignCourier(c *Courier, now time.Time) error {
 	if !o.CanAssign() {
-		return InvalidTransition(o.Status, StatusAssigned)
+		return RuleViolation("назначить курьера можно только новому заказу")
 	}
 	if err := c.TakeOrder(); err != nil {
 		return err
 	}
 	o.CourierID = c.ID
-	o.moveTo(StatusAssigned, now)
+	o.setStatus(StatusAssigned, now)
 	return nil
 }
 
 func (o *Order) ChangeStatus(to OrderStatus, now time.Time) error {
-	if !to.Valid() {
-		return RuleViolation("неизвестный статус %q", to)
-	}
 	if to == StatusAssigned {
-		return RuleViolation("статус «%s» ставится через «Назначить курьера»", to.Title())
+		return RuleViolation("для этого статуса нажмите «Назначить курьера»")
 	}
-	if !o.canMoveTo(to) {
-		return InvalidTransition(o.Status, to)
+	if !slices.Contains(o.NextStatuses(), to) {
+		return RuleViolation("нельзя перейти из «%s» в «%s»", o.Status.Title(), to.Title())
 	}
-	o.moveTo(to, now)
+	o.setStatus(to, now)
 	return nil
 }
 
-// ApplyEdit переносит изменения из заново собранного заказа (только пока он «Создан»).
-func (o *Order) ApplyEdit(edited *Order, now time.Time) error {
-	if !o.CanEdit() {
-		return RuleViolation("изменять можно только заказ в статусе «%s»", StatusCreated.Title())
-	}
-	o.CustomerID = edited.CustomerID
-	o.Description = edited.Description
-	o.WeightKg = edited.WeightKg
-	o.DeclaredValue = edited.DeclaredValue
-	o.DeliveryType = edited.DeliveryType
-	o.Address = edited.Address
-	o.PickupPointID = edited.PickupPointID
-	o.District = edited.District
-	o.DistanceKm = edited.DistanceKm
-	o.PricingStrategy = edited.PricingStrategy
-	o.Extras = edited.Extras
-	o.PriceLines = edited.PriceLines
-	o.Price = edited.Price
-	o.UpdatedAt = now
-	return nil
-}
-
-func (o *Order) moveTo(to OrderStatus, now time.Time) {
-	from := o.Status
+func (o *Order) setStatus(to OrderStatus, now time.Time) {
+	o.History = append(o.History, StatusChange{From: o.Status, To: to, At: now})
 	o.Status = to
 	o.UpdatedAt = now
-	o.History = append(o.History, StatusChange{From: from, To: to, At: now})
 }

@@ -110,8 +110,6 @@ export type DailyReport = {
   cancelledOrders: number
   revenue: number
   averagePrice: number
-  byStatus: { status: string; title: string; count: number }[]
-  byDelivery: { type: string; title: string; count: number; revenue: number }[]
   couriers: { id: string; name: string; activeOrders: number; capacity: number; delivered: number }[]
   orders: { id: string; created: string; customer: string; delivery: string; status: string; courier: string; price: number }[] | null
 }
@@ -140,12 +138,9 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     throw new ApiError(0, 'Сервер недоступен. Запущен ли backend?')
   }
 
-  if (response.status === 204) return undefined as T
   const data = await response.json().catch(() => null)
   if (!response.ok) {
-    const fields: Record<string, string> = {}
-    for (const f of data?.fields ?? []) fields[f.field] ??= f.message
-    throw new ApiError(response.status, data?.error ?? `Ошибка ${response.status}`, fields)
+    throw new ApiError(response.status, data?.error ?? `Ошибка ${response.status}`, data?.fields ?? {})
   }
   return data as T
 }

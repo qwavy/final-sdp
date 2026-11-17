@@ -49,7 +49,7 @@ type Notifier interface {
 	Notify(n Notification) error
 }
 
-// ExportStore сохраняет выгруженные отчёты и возвращает путь к файлу.
+// ExportStore сохраняет выгруженные отчёты.
 type ExportStore interface {
-	SaveExport(name string, data []byte) (string, error)
+	SaveExport(name string, data []byte) error
 }

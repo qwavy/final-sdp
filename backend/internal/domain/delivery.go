@@ -2,14 +2,13 @@ package domain
 
 // ПАТТЕРН FACTORY METHOD
 //
-// Product         — DeliveryMethod (способ доставки: тариф, лимит веса, правила статусов).
+// Product         — DeliveryMethod (тариф, лимит веса, какие статусы дальше).
 // ConcreteProduct — doorDelivery, pickupPointDelivery, lockerDelivery.
 // Creator         — DeliveryCreator с фабричным методом CreateMethod().
-// ConcreteCreator — DoorDeliveryCreator, PickupPointDeliveryCreator, LockerDeliveryCreator.
+// ConcreteCreator — DoorCreator, PickupPointCreator, LockerCreator.
 //
-// Остальной код (Order, OrderBuilder, расчёт цены) работает только с интерфейсом
-// DeliveryMethod и не знает конкретных типов. Новый способ доставки =
-// новый продукт + новый создатель + одна строка в deliveryCreators.
+// Остальной код работает только с интерфейсом DeliveryMethod
+// и не знает, какой именно способ доставки внутри.
 
 type DeliveryType string
 
@@ -19,7 +18,7 @@ const (
 	DeliveryLocker      DeliveryType = "locker"
 )
 
-// DeliveryMethod — Product.
+// Product
 type DeliveryMethod interface {
 	Type() DeliveryType
 	Title() string
@@ -29,56 +28,48 @@ type DeliveryMethod interface {
 	NextStatuses(from OrderStatus) []OrderStatus
 }
 
-// DeliveryCreator — Creator.
+// Creator
 type DeliveryCreator interface {
 	CreateMethod() DeliveryMethod
 }
 
-type DoorDeliveryCreator struct{}
-type PickupPointDeliveryCreator struct{}
-type LockerDeliveryCreator struct{}
+// Concrete creators
+type DoorCreator struct{}
+type PickupPointCreator struct{}
+type LockerCreator struct{}
 
-func (DoorDeliveryCreator) CreateMethod() DeliveryMethod        { return doorDelivery{} }
-func (PickupPointDeliveryCreator) CreateMethod() DeliveryMethod { return pickupPointDelivery{} }
-func (LockerDeliveryCreator) CreateMethod() DeliveryMethod      { return lockerDelivery{} }
+func (DoorCreator) CreateMethod() DeliveryMethod        { return doorDelivery{} }
+func (PickupPointCreator) CreateMethod() DeliveryMethod { return pickupPointDelivery{} }
+func (LockerCreator) CreateMethod() DeliveryMethod      { return lockerDelivery{} }
 
-// Порядок важен: в таком порядке способы показываются в интерфейсе.
-var deliveryTypes = []DeliveryType{DeliveryDoor, DeliveryPickupPoint, DeliveryLocker}
-
-var deliveryCreators = map[DeliveryType]DeliveryCreator{
-	DeliveryDoor:        DoorDeliveryCreator{},
-	DeliveryPickupPoint: PickupPointDeliveryCreator{},
-	DeliveryLocker:      LockerDeliveryCreator{},
+var creators = map[DeliveryType]DeliveryCreator{
+	DeliveryDoor:        DoorCreator{},
+	DeliveryPickupPoint: PickupPointCreator{},
+	DeliveryLocker:      LockerCreator{},
 }
 
-// NewDeliveryMethod находит создателя по типу и вызывает фабричный метод.
+// DeliveryTypes — порядок способов доставки в интерфейсе.
+var DeliveryTypes = []DeliveryType{DeliveryDoor, DeliveryPickupPoint, DeliveryLocker}
+
+// NewDeliveryMethod выбирает создателя по типу и вызывает фабричный метод.
 func NewDeliveryMethod(t DeliveryType) (DeliveryMethod, error) {
-	creator, ok := deliveryCreators[t]
+	creator, ok := creators[t]
 	if !ok {
 		return nil, RuleViolation("неизвестный способ доставки %q", t)
 	}
 	return creator.CreateMethod(), nil
 }
 
-// DeliveryMethods — все способы доставки (для формы в интерфейсе).
-func DeliveryMethods() []DeliveryMethod {
-	methods := make([]DeliveryMethod, 0, len(deliveryTypes))
-	for _, t := range deliveryTypes {
-		methods = append(methods, deliveryCreators[t].CreateMethod())
-	}
-	return methods
-}
-
 // --- Concrete products ---
 
-// Курьер везёт до двери: после «В пути» сразу «Выдан».
+// До двери: после «В пути» сразу «Выдан».
 var doorFlow = map[OrderStatus][]OrderStatus{
 	StatusCreated:   {StatusAssigned, StatusCancelled},
 	StatusAssigned:  {StatusInTransit, StatusCancelled},
 	StatusInTransit: {StatusDelivered, StatusCancelled},
 }
 
-// Через ПВЗ/постамат: посылка сначала ждёт в точке выдачи.
+// Через ПВЗ или постамат: посылка сначала ждёт в точке выдачи.
 var pickupFlow = map[OrderStatus][]OrderStatus{
 	StatusCreated:       {StatusAssigned, StatusCancelled},
 	StatusAssigned:      {StatusInTransit, StatusCancelled},

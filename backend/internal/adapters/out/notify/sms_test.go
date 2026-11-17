@@ -9,17 +9,17 @@ import (
 	"parcelhub/internal/application/port"
 )
 
-// Adapter: наш формат (+7..., любой длины текст) приводится к формату шлюза.
+// Adapter: наш формат (+7…, текст любой длины) приводится к формату шлюза.
 func TestSmsNotifierAdaptsToGateway(t *testing.T) {
-	outbox := filepath.Join(t.TempDir(), "outbox.jsonl")
-	adapter := NewSmsNotifier(NewSmsGatewayClient(outbox), "ParcelHub")
+	outbox := filepath.Join(t.TempDir(), "outbox.txt")
+	adapter := NewSmsNotifier(&SmsGateway{OutboxFile: outbox})
 
 	long := strings.Repeat("а", 300)
 	if err := adapter.Notify(port.Notification{Phone: "+77011234567", Text: long}); err != nil {
 		t.Fatalf("ожидали успешную отправку: %v", err)
 	}
 	data, _ := os.ReadFile(outbox)
-	if !strings.Contains(string(data), `"to":"77011234567"`) {
+	if !strings.Contains(string(data), "to=77011234567") {
 		t.Fatalf("номер должен уйти без «+»: %s", data)
 	}
 

@@ -2,17 +2,16 @@ package storage
 
 import (
 	"encoding/json"
-	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 
 	"parcelhub/internal/application/port"
 	"parcelhub/internal/domain"
 )
 
-// Store открывает все JSON-файлы в папке данных.
+// Store — все данные приложения: по JSON-файлу на тип сущности.
 type Store struct {
 	Orders       *Collection[domain.Order]
 	Customers    *Collection[domain.Customer]
@@ -26,7 +25,9 @@ func Open(dir string) (*Store, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
 	}
-	s := &Store{}
+	s := &Store{
+		Exports: &ExportFolder{dir: filepath.Join(dir, "exports")},
+	}
 	var err error
 	if s.Orders, err = openCollection(filepath.Join(dir, "orders.json"), "заказ",
 		func(o *domain.Order) string { return o.ID }); err != nil {
@@ -44,53 +45,31 @@ func Open(dir string) (*Store, error) {
 		func(p *domain.PickupPoint) string { return p.ID }); err != nil {
 		return nil, err
 	}
-	if s.Activity, err = openActivityLog(filepath.Join(dir, "activity.json")); err != nil {
-		return nil, err
+	s.Activity = &ActivityLog{path: filepath.Join(dir, "activity.json")}
+	if data, err := os.ReadFile(s.Activity.path); err == nil {
+		_ = json.Unmarshal(data, &s.Activity.entries)
 	}
-	s.Exports = &ExportFolder{dir: filepath.Join(dir, "exports")}
 	return s, nil
 }
 
-// IsEmpty — true при самом первом запуске (тогда загружаются тестовые данные).
+// IsEmpty — true при первом запуске (тогда загружаются тестовые данные).
 func (s *Store) IsEmpty() bool {
-	return s.Orders.Len() == 0 && s.Customers.Len() == 0 && s.Couriers.Len() == 0 && s.PickupPoints.Len() == 0
+	return s.Customers.Len() == 0 && s.Couriers.Len() == 0
 }
 
-// ActivityLog — журнал событий (новые записи в конце файла).
+// ActivityLog — журнал событий, хранится в activity.json.
 type ActivityLog struct {
 	mu      sync.Mutex
 	path    string
 	entries []port.ActivityEntry
 }
 
-const maxActivityEntries = 1000
-
-func openActivityLog(path string) (*ActivityLog, error) {
-	log := &ActivityLog{path: path}
-	data, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return log, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	if err := json.Unmarshal(data, &log.entries); err != nil {
-		return nil, fmt.Errorf("файл %s повреждён: %w", path, err)
-	}
-	return log, nil
-}
-
 func (l *ActivityLog) Append(entry port.ActivityEntry) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	if entry.ID == "" {
-		entry.ID = domain.NewID("EVT")
-	}
+	entry.ID = domain.NewID("EVT")
 	l.entries = append(l.entries, entry)
-	if len(l.entries) > maxActivityEntries {
-		l.entries = l.entries[len(l.entries)-maxActivityEntries:]
-	}
 	data, err := json.MarshalIndent(l.entries, "", "  ")
 	if err != nil {
 		return err
@@ -98,17 +77,15 @@ func (l *ActivityLog) Append(entry port.ActivityEntry) error {
 	return os.WriteFile(l.path, data, 0o644)
 }
 
-// List отдаёт последние записи, самые новые первыми.
+// List — последние записи, новые первыми.
 func (l *ActivityLog) List(limit int) ([]port.ActivityEntry, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	if limit <= 0 || limit > len(l.entries) {
-		limit = len(l.entries)
-	}
-	result := make([]port.ActivityEntry, 0, limit)
-	for i := len(l.entries) - 1; i >= 0 && len(result) < limit; i-- {
-		result = append(result, l.entries[i])
+	result := slices.Clone(l.entries)
+	slices.Reverse(result)
+	if limit > 0 && limit < len(result) {
+		result = result[:limit]
 	}
 	return result, nil
 }
@@ -118,10 +95,9 @@ type ExportFolder struct {
 	dir string
 }
 
-func (e *ExportFolder) SaveExport(name string, data []byte) (string, error) {
+func (e *ExportFolder) SaveExport(name string, data []byte) error {
 	if err := os.MkdirAll(e.dir, 0o755); err != nil {
-		return "", err
+		return err
 	}
-	path := filepath.Join(e.dir, filepath.Base(name))
-	return path, os.WriteFile(path, data, 0o644)
+	return os.WriteFile(filepath.Join(e.dir, name), data, 0o644)
 }

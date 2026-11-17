@@ -1,120 +1,79 @@
 # Parcel Hub — разбор кода
 
-Этот файл объясняет, **как устроен код**: что за что отвечает и как проходит запрос.
-Что сделано по ТЗ и зачем нужны паттерны — в [PROJECT.md](PROJECT.md).
+Что сделано по ТЗ и зачем паттерны — в [PROJECT.md](PROJECT.md).
+Здесь — **как устроен код**, простыми словами.
 
 ---
 
-## 1. Карта папок
+## 1. Папки
 
 ```
 backend/
-  cmd/server/
-    main.go          ← запуск: собирает все части вместе
-    seed.go          ← тестовые данные при первом запуске
+  cmd/server/main.go     ← запуск: соединяет все части
+  cmd/server/seed.go     ← тестовые данные при первом запуске
   internal/
-    domain/          ← бизнес-логика и правила (ни от чего не зависит)
+    domain/              ← правила и паттерны (Builder, Factory Method, Strategy, Decorator)
     application/
-      facade.go      ← Facade: единственный вход для HTTP
-      port/          ← интерфейсы «что нам нужно снаружи»
-      events/        ← Observer: Publisher и наблюдатели
+      facade.go          ← Facade: единственный вход для HTTP
+      port/              ← интерфейсы: «что нам нужно снаружи»
+      events/            ← Observer
       use_cases/
-        command/     ← команды: меняют данные
-        query/       ← запросы: только читают
+        command/         ← команды: МЕНЯЮТ данные
+        query/           ← запросы: ТОЛЬКО ЧИТАЮТ
     adapters/
-      in/http/       ← REST API
-      out/storage/   ← хранение в JSON-файлах
-      out/notify/    ← SMS-шлюз (Adapter)
-frontend/src/
-  lib/api.ts         ← все запросы к серверу
-  lib/app.tsx        ← общее состояние: справочники и обновление таблиц
-  pages/             ← экраны: заказы, клиенты, курьеры, журнал, отчёт
-  components/ui/     ← готовые компоненты shadcn
+      in/http/           ← REST API
+      out/storage/       ← JSON-файлы
+      out/notify/        ← SMS (Adapter)
 ```
 
-**Правило зависимостей:** `adapters → application → domain`.
-Внутренний слой никогда не импортирует внешний. Например, в `domain` нет ни одного `import`
-из `application` или `adapters`.
+**Гексагональная архитектура:** в центре — `domain` и `application`, по краям — адаптеры.
+Внутренний слой никогда не импортирует внешний: `adapters → application → domain`.
 
-`internal/` — особая папка Go: её код нельзя импортировать из других модулей.
+**CQS:** команды меняют данные и возвращают только ошибку (или ID нового объекта).
+Запросы только читают и возвращают данные для экрана.
 
 ---
 
-## 2. Как проходит один запрос (на примере «сменить статус»)
+## 2. Как проходит один запрос
 
-Пользователь нажимает «→ В пути» в карточке заказа.
+Пользователь нажал «→ В пути»:
 
 ```
-Браузер                         Сервер
-───────                         ──────
-api.changeStatus(id, "in_transit")
-  POST /api/orders/{id}/status ──►  router.go: маршрут → handlers.changeStatus
-                                     │ читает JSON {"status": "in_transit"}
-                                     ▼
-                                  DeliveryFacade.ChangeOrderStatus(id, status)
-                                     │
-                                     ├─► command.OrderCommands.ChangeStatus
-                                     │     1. orders.Get(id)           ← из JSON-файла
-                                     │     2. order.ChangeStatus(...)   ← domain проверяет правило
-                                     │     3. orders.Save(order)        ← в JSON-файл
-                                     │     4. publisher.Notify(event)   ← Observer
-                                     │           ├─ ActivityRecorder → запись в журнал
-                                     │           └─ CustomerNotifier → SMS через адаптер
-                                     │
-                                     └─► query.OrderQueries.Get(id)
-                                           собирает OrderView с именами
-  ◄──────────── 200 OK + JSON заказа ──────┘
-  → уведомление «Заказ …: В пути»
-  → refresh() → все таблицы перезагружают данные
+браузер:  POST /api/orders/ORD-1/status  {"status": "in_transit"}
+   │
+   ▼
+http/handlers.go   changeStatus      → читает JSON
+   ▼
+facade.go          ChangeOrderStatus
+   ├─ command  ChangeStatus
+   │     1. orders.Get(id)            — достать из файла
+   │     2. order.ChangeStatus(...)   — domain проверяет правило
+   │     3. orders.Save(order)        — записать в файл
+   │     4. publisher.Notify(event)   — Observer: журнал + SMS
+   └─ query    Get(id)                — прочитать заказ для ответа
+   ▼
+браузер получает JSON заказа, показывает уведомление и обновляет таблицы
 ```
 
-Если правило нарушено (например, «Создан» → «Выдан»), на шаге 2 domain вернёт ошибку,
-ничего не сохранится, и HTTP ответит `409` с понятным текстом.
+Если правило нарушено («Создан» → «Выдан»), на шаге 2 вернётся ошибка,
+ничего не сохранится, а браузер получит `409` с текстом ошибки.
 
 ---
 
-## 3. Domain — `internal/domain`
+## 3. Domain — правила
 
 | Файл | Что внутри |
 |---|---|
-| `order.go` | `Order`, статусы, методы `AssignCourier`, `ChangeStatus`, `ApplyEdit` |
-| `order_builder.go` | **Builder**: `OrderBuilder` и вся проверка полей заказа |
-| `delivery.go` | **Factory Method**: способы доставки и их правила статусов |
-| `pricing.go` | **Strategy**: способы расчёта цены |
-| `price.go` | **Decorator**: базовая цена + доп. услуги; функция `BuildPrice` |
-| `courier_selection.go` | **Strategy**: способы выбора курьера |
-| `customer.go`, `courier.go`, `pickup_point.go` | остальные сущности и их проверки |
-| `errors.go` | виды ошибок: `ValidationError`, `NotFound`, `RuleViolation`, `InvalidTransition` |
-| `geo.go` | районы, координаты, расстояние от склада |
-| `common.go` | `Money`, генерация ID, нормализация телефона |
-
-### Order
-
-Заказ сам меняет своё состояние и проверяет правила. Например, смена статуса:
-
-```go
-func (o *Order) moveTo(to OrderStatus, now time.Time) {
-    from := o.Status
-    o.Status = to
-    o.UpdatedAt = now
-    o.History = append(o.History, StatusChange{From: from, To: to, At: now})
-}
-```
-
-Domain не знает ни о журнале, ни об SMS — об этом заботится команда (см. Observer ниже).
-
-### Как проверяются переходы статусов
-
-Заказ сам не знает, куда можно перейти. Он спрашивает свой способ доставки:
-
-```go
-func (o *Order) NextStatuses() []OrderStatus {
-    method, _ := NewDeliveryMethod(o.DeliveryType) // Factory Method
-    return method.NextStatuses(o.Status)
-}
-```
-
-У доставки до двери таблица `doorFlow`, у ПВЗ и постамата — `pickupFlow` (в `delivery.go`).
+| `order.go` | заказ, статусы, `AssignCourier`, `ChangeStatus` |
+| `order_builder.go` | **Builder** |
+| `delivery.go` | **Factory Method** — способы доставки |
+| `pricing.go` | **Strategy** — расчёт цены |
+| `courier_selection.go` | **Strategy** — выбор курьера |
+| `price.go` | **Decorator** — доп. услуги |
+| `customer.go`, `courier.go`, `pickup_point.go` | клиент, курьер, точка выдачи |
+| `errors.go` | ошибки: `ValidationError`, `NotFound`, `RuleViolation` |
+| `geo.go` | районы и расстояния |
+| `common.go` | `Money`, генерация ID, телефон |
 
 ### Builder
 
@@ -129,34 +88,40 @@ order, err := domain.NewOrderBuilder().
     Build(time.Now())
 ```
 
-Каждый метод только запоминает значение и возвращает `b` — поэтому их можно вызывать цепочкой.
-Вся проверка — в `Build()`: собирает **все** ошибки в `ValidationError` и возвращает их
-вместе (форма подсвечивает все поля сразу). Если ошибок нет — считает расстояние, цену,
-ставит статус «Создан».
-
-`Invalid(field, msg)` — чтобы снаружи добавить ошибку, которую домен проверить не может
-(например, «клиент не найден» — для этого нужно хранилище).
+Каждый метод запоминает значение и возвращает builder — поэтому можно писать цепочкой.
+Все проверки — в `Build()`. Он собирает **все** ошибки сразу
+(`ValidationError` — это `map[поле]текст`), поэтому форма подсвечивает все поля.
+Если ошибок нет — считает расстояние, цену и возвращает заказ со статусом «Создан».
 
 ### Factory Method
 
 ```go
 type DeliveryMethod interface {        // Product
-    Type() DeliveryType
+    Title() string
     BaseFee() Money
     MaxWeightKg() float64
-    NeedsPickupPoint() bool
     NextStatuses(from OrderStatus) []OrderStatus
+    ...
 }
 
 type DeliveryCreator interface {       // Creator
     CreateMethod() DeliveryMethod      // фабричный метод
 }
 
-type LockerDeliveryCreator struct{}    // ConcreteCreator
-func (LockerDeliveryCreator) CreateMethod() DeliveryMethod { return lockerDelivery{} }
+type LockerCreator struct{}            // ConcreteCreator
+func (LockerCreator) CreateMethod() DeliveryMethod { return lockerDelivery{} }
 ```
 
-`NewDeliveryMethod(t)` берёт нужного создателя из карты `deliveryCreators` и вызывает его.
+`NewDeliveryMethod(t)` берёт создателя из карты `creators` по типу доставки и вызывает его.
+Дальше код работает только с интерфейсом `DeliveryMethod`. Например, заказ спрашивает
+у своего способа доставки, какие статусы можно ставить дальше:
+
+```go
+func (o *Order) NextStatuses() []OrderStatus {
+    method, _ := NewDeliveryMethod(o.DeliveryType)
+    return method.NextStatuses(o.Status)
+}
+```
 
 ### Strategy
 
@@ -164,13 +129,15 @@ func (LockerDeliveryCreator) CreateMethod() DeliveryMethod { return lockerDelive
 type PricingStrategy interface {
     Code() string
     Title() string
-    Calculate(in PricingInput) Money
+    Calculate(weightKg, distanceKm float64) Money
 }
 ```
 
-`WeightPricing` и `DistancePricing` реализуют один интерфейс. Список `pricingStrategies`
-— это «реестр»: по нему строится выбор в форме и ищется стратегия по коду.
-`CourierSelector` устроен так же.
+`WeightPricing` и `DistancePricing` — две реализации. Список `PricingStrategies` —
+все стратегии: по нему строится выбор в форме и ищется стратегия по коду.
+
+Выбор курьера устроен так же: `CourierSelector` → `NearestCourier` и `LeastLoadedCourier`.
+Внутри — простой цикл «найти лучшего свободного курьера».
 
 ### Decorator
 
@@ -180,37 +147,34 @@ type PriceComponent interface {
     Lines() []PriceLine
 }
 
-type fragileExtra struct{ inner PriceComponent }   // обёртка хранит то, что оборачивает
+type fragile struct{ inner PriceComponent }      // обёртка хранит то, что оборачивает
 
-func (e fragileExtra) Total() Money { return e.inner.Total() + 400 }
+func (e fragile) Total() Money { return e.inner.Total() + 400 }
 ```
 
-`BuildPrice` создаёт `basePrice`, а затем по очереди оборачивает его выбранными услугами:
+`CalculatePrice` создаёт базовую цену и по очереди оборачивает её выбранными услугами:
 
 ```go
 var price PriceComponent = basePrice{...}
-for _, extra := range extras {
-    if slices.Contains(spec.Extras, extra.Code) {
-        price = extra.wrap(price, spec.DeclaredValue)  // обёртка вокруг предыдущей цены
+for _, extra := range Extras {
+    if slices.Contains(in.Extras, extra.Code) {
+        price = wrap(price, extra.Code, in.DeclaredValue)
     }
 }
 ```
 
 Получается «матрёшка»: `express( fragile( insurance( base ) ) )`.
-Вызов `Total()` у внешней обёртки проходит вглубь до базы и возвращается, добавляя по пути
-стоимость каждой услуги.
+`Total()` внешней обёртки идёт внутрь до базы и на обратном пути добавляет стоимость каждой услуги.
 
 ### Ошибки
 
 - `ValidationError` — ошибки полей формы → HTTP `422`.
 - `NotFound(...)` → `404`.
-- `RuleViolation(...)`, `InvalidTransition(...)` → `409`.
-
-HTTP-слой узнаёт вид ошибки через `errors.Is` / `errors.As`, а текст берёт из `err.Error()`.
+- `RuleViolation(...)` — нарушено правило (например, недопустимый статус) → `409`.
 
 ---
 
-## 4. Application — `internal/application`
+## 4. Application — сценарии
 
 ### port — интерфейсы
 
@@ -221,30 +185,21 @@ type Repository[T any] interface {
     Save(item T) error
     Delete(id string) error
 }
-type OrderRepository = Repository[*domain.Order]
 
 type Notifier interface { Notify(n Notification) error }
 ```
 
-Это **порты**: application говорит, что ему нужно, но не знает, кто это сделает.
-Реализации — в `adapters/out`. `[T any]` — дженерик: один интерфейс для заказов,
-клиентов, курьеров.
+Application говорит, **что** ему нужно, но не знает, **кто** это сделает.
+Реализации лежат в `adapters/out`. Поэтому в тестах SMS можно заменить заглушкой.
 
 ### events — Observer
 
 ```go
-type Event struct {                     // что произошло
-    Type    Type                        // "order.status_changed" и т.д.
-    OrderID string
-    Message string
-    At      time.Time
-}
-
-type Observer interface {               // Observer
+type Observer interface {
     Update(e Event)
 }
 
-type Publisher struct {                 // Subject
+type Publisher struct {
     observers []Observer
 }
 
@@ -257,33 +212,30 @@ func (p *Publisher) Notify(e Event) {
 }
 ```
 
-- **Как работает:** `Publisher` хранит список наблюдателей. Команда после изменения заказа
-  вызывает `Notify`, и каждый наблюдатель получает событие. Команда не знает,
-  сколько наблюдателей и что они делают.
-- **Наблюдатели** (`subscribers.go`):
-  - `ActivityRecorder` — пишет каждое событие в журнал.
-  - `CustomerNotifier` — реагирует только на `OrderStatusChanged`, находит клиента
-    и отправляет SMS через `port.Notifier`. Результат (успех или ошибка) тоже пишет в журнал.
-- **Где подписываются:** `cmd/server/main.go`, один раз при запуске.
+- `Publisher` — список наблюдателей. Команда вызывает `Notify`, каждый получает событие.
+- Наблюдатели (`subscribers.go`):
+  - `ActivityRecorder` — пишет событие в журнал;
+  - `CustomerNotifier` — при смене статуса отправляет клиенту SMS.
+- Подписка — в `main.go`.
 
-### use_cases/command — команды
+### command — команды
 
-`OrderCommands` (`order.go`): `Create`, `Update`, `Delete`, `AssignCourier`, `ChangeStatus`.
-`CustomerCommands`, `CourierCommands` (`directory.go`): добавление, изменение, удаление.
+`OrderCommands`: `Create`, `Update`, `Delete`, `AssignCourier`, `ChangeStatus`.
+`CustomerCommands`, `CourierCommands`: добавить, изменить, удалить.
 
-Общий шаблон каждой команды:
-1. достать объект из репозитория;
-2. вызвать метод домена (он проверит правила);
+Каждая команда делает одно и то же:
+1. достать объект из хранилища;
+2. вызвать метод domain (он проверит правила);
 3. сохранить;
-4. оповестить наблюдателей (`c.notify(...)` → `publisher.Notify`).
+4. оповестить наблюдателей.
 
 ```go
 func (c *OrderCommands) AssignCourier(id, selectorCode string) error {
     order, _ := c.orders.Get(id)
-    selector, _ := domain.CourierSelectorByCode(selectorCode) // Strategy по выбору пользователя
+    selector, _ := domain.CourierSelectorByCode(selectorCode) // Strategy
     couriers, _ := c.couriers.List()
     courier, _ := selector.Select(order, couriers)
-    order.AssignCourier(courier, c.now())                     // правило в домене
+    order.AssignCourier(courier, c.now())                     // правило в domain
     c.couriers.Save(courier)
     c.orders.Save(order)
     c.notify(events.OrderStatusChanged, id, "...")            // Observer
@@ -292,109 +244,95 @@ func (c *OrderCommands) AssignCourier(id, selectorCode string) error {
 ```
 (в настоящем коде после каждого шага проверяется `err`.)
 
-`now func() time.Time` передаётся снаружи, а не вызывается `time.Now()` напрямую —
-чтобы в тестах можно было подставить фиксированное время.
+### query — запросы
 
-### use_cases/query — запросы
-
-- `OrderQueries.List / Get` — возвращают `OrderView`: заказ плюс имя клиента, курьера,
-  название точки, список доступных статусов, флаги `editable / deletable / assignable`.
-  Интерфейс просто показывает то, что пришло, и не дублирует бизнес-правила.
-- `OrderQueries.Quote` — считает цену **по всем стратегиям** без сохранения (для формы).
-- `DirectoryQueries` — клиенты, курьеры, точки, журнал, справочники для форм (`CatalogOptions`).
-- `ReportQueries.Daily` — отчёт за день; `DailyReport.CSV()` / `.JSON()` — выгрузка.
-
-`loadReferences` один раз загружает клиентов, курьеров и точки в карты `map[id]...`,
-чтобы быстро подставлять имена вместо ID.
+- `OrderQueries.List / Get` — заказ + имена клиента и курьера + какие кнопки доступны
+  (`nextStatuses`, `editable`, `deletable`). Фронтенд просто показывает то, что пришло.
+- `OrderQueries.Quote` — цена по всем стратегиям сразу, без сохранения (для формы).
+- `OrderQueries.DailyReport` — отчёт за день; `report.CSV()` — выгрузка в Excel.
+- `DirectoryQueries` — клиенты, курьеры, точки, журнал, справочники для форм.
 
 ### facade.go — Facade
 
 ```go
-func (f *DeliveryFacade) ChangeOrderStatus(orderID, status string) (query.OrderView, error) {
-    if err := f.orderCmd.ChangeStatus(orderID, status); err != nil {   // команда
+func (f *DeliveryFacade) ChangeOrderStatus(id, status string) (query.OrderView, error) {
+    if err := f.orderCmd.ChangeStatus(id, status); err != nil {   // команда
         return query.OrderView{}, err
     }
-    return f.orders.Get(orderID)                                       // запрос
+    return f.orders.Get(id)                                       // запрос
 }
 ```
 
-Фасад соединяет CQS-команду и запрос, чтобы HTTP получил готовый ответ одним вызовом.
-`NewDeliveryFacade(Deps)` создаёт все команды и запросы — снаружи их никто не собирает.
+HTTP вызывает один метод фасада и получает готовый ответ.
+О командах, запросах и хранилище HTTP не знает.
 
 ---
 
-## 5. Adapters — `internal/adapters`
+## 5. Adapters — края приложения
 
 ### in/http — входной адаптер
 
-| Файл | Что делает |
-|---|---|
-| `router.go` | список маршрутов (`mux.Handle("POST /api/orders", ...)`), раздача собранного фронтенда, лог запросов |
-| `handlers.go` | обработчики: прочитать запрос → вызвать фасад → записать ответ |
-| `respond.go` | `writeJSON`, `readJSON`, `writeError` (выбор HTTP-кода по виду ошибки) |
-
-- **Маршруты** вида `"GET /api/orders/{id}"` — встроенная возможность `net/http` с Go 1.22.
-  `r.PathValue("id")` достаёт `{id}` из пути.
-- **`apiFunc`** — обработчик, который возвращает `error`. Если ошибка есть, `ServeHTTP`
-  сам вызывает `writeError`. Так в обработчиках нет повторяющегося кода ответа об ошибке.
-- **`spaHandler`** — отдаёт файлы из `frontend/dist`, а на неизвестные пути — `index.html`.
+- `router.go` — список маршрутов: `"POST /api/orders"` → обработчик.
+- `handlers.go` — обработчики. Каждый: прочитать запрос → вызвать фасад → вернуть результат.
+  ```go
+  func (a *api) createOrder(r *http.Request) (any, error) {
+      var in command.OrderInput
+      if err := readJSON(r, &in); err != nil {
+          return nil, err
+      }
+      return a.facade.CreateOrder(in)
+  }
+  ```
+- `respond.go` — `handler` превращает `(данные, ошибка)` в JSON-ответ;
+  `writeError` выбирает код по виду ошибки (422 / 404 / 409 / 400 / 500).
 
 ### out/storage — хранилище
 
-- `Collection[T]` (`collection.go`) — один JSON-файл = один тип сущностей.
-  В памяти — обычная `map[id]T`. При запуске файл читается, после каждого `Save` / `Delete`
-  перезаписывается целиком.
-- `Get` и `List` возвращают **копии**: если изменить объект и не вызвать `Save`,
-  в хранилище ничего не поменяется.
-- `sync.Mutex` — сервер обрабатывает запросы параллельно, мьютекс не даёт двум запросам
+- `Collection[T]` — один JSON-файл на тип: в памяти `map[id]T`.
+  При запуске файл читается, после `Save` / `Delete` перезаписывается целиком.
+- `Get` и `List` отдают **копии** — объект меняется в хранилище только через `Save`.
+- `sync.Mutex` — сервер обрабатывает запросы параллельно, мьютекс не даёт им
   одновременно менять `map`.
-- `Store` (`store.go`) открывает все файлы: `orders.json`, `customers.json`, `couriers.json`,
-  `pickup_points.json`, `activity.json`; `ExportFolder` сохраняет отчёты в `exports/`.
-
-`Collection[T]` подходит под интерфейс `port.Repository[T]` — Go проверяет это сам,
-явно писать «implements» не нужно.
+- `ActivityLog` — журнал в `activity.json`, `ExportFolder` — отчёты в `exports/`.
 
 ### out/notify — Adapter
 
 ```go
-// Adaptee: чужой SDK, его не меняем
-func (g *SmsGatewayClient) SendSMS(msisdn, sender, body string) (statusCode int, messageID string)
+// Adaptee: «чужой» SMS-сервис — номер без «+», ответ — код
+func (g *SmsGateway) Send(number, text string) int
 
 // Adapter: реализует наш port.Notifier
 func (a *SmsNotifier) Notify(n port.Notification) error {
-    msisdn := strings.TrimPrefix(n.Phone, "+")       // +7701... → 7701...
-    body := truncate(n.Text, 160)                    // лимит шлюза
-    code, _ := a.gateway.SendSMS(msisdn, a.sender, body)
-    switch code {                                    // код → error
-    case GatewayOK:
+    number := strings.TrimPrefix(n.Phone, "+")   // +7701… → 7701…
+    switch a.gateway.Send(number, text) {        // код → error
+    case 200:
         return nil
-    ...
+    case 400:
+        return fmt.Errorf("шлюз не принял номер %s", n.Phone)
+    default:
+        return fmt.Errorf("SMS-шлюз недоступен")
     }
 }
 ```
 
-`var _ port.Notifier = (*SmsNotifier)(nil)` — проверка при компиляции, что адаптер
-действительно реализует интерфейс.
+«Отправленные» SMS пишутся в `backend/data/sms_outbox.txt`.
 
 ---
 
-## 6. main.go — сборка (composition root)
+## 6. main.go — сборка
 
 ```go
-store := storage.Open(dataDir)                       // 1. хранилище
-publisher := events.NewPublisher()                   // 2. Observer
-sms := notify.NewSmsNotifier(...)                    // 3. адаптер SMS
-publisher.Subscribe(events.NewActivityRecorder(...)) // 4. наблюдатели
+store := storage.Open(dataDir)                          // 1. хранилище
+publisher := events.NewPublisher()                      // 2. Observer
+publisher.Subscribe(events.NewActivityRecorder(...))
 publisher.Subscribe(events.NewCustomerNotifier(..., sms, ...))
-facade := application.NewDeliveryFacade(Deps{...})  // 5. фасад
-if store.IsEmpty() { seed(facade, store) }           // 6. тестовые данные
-http.Server{Handler: httpadapter.NewRouter(...)}     // 7. HTTP
+facade := application.NewDeliveryFacade(Deps{...})      // 3. фасад
+if store.IsEmpty() { seed(facade, store) }              // 4. тестовые данные
+http.ListenAndServe(addr, httpadapter.NewRouter(...))   // 5. HTTP
 ```
 
-Это единственное место, где все слои встречаются. Остальной код получает зависимости
-через параметры (dependency injection), поэтому в тестах их легко заменить.
-
-`signal.NotifyContext` + `server.Shutdown` — аккуратная остановка по Ctrl+C.
+Единственное место, где встречаются все слои. Остальной код получает зависимости
+через параметры — поэтому в тестах их легко заменить.
 
 ---
 
@@ -402,17 +340,13 @@ http.Server{Handler: httpadapter.NewRouter(...)}     // 7. HTTP
 
 | Файл | Что делает |
 |---|---|
-| `lib/api.ts` | типы данных (как в JSON сервера) и функции запросов; `ApiError` с ошибками по полям |
-| `lib/app.tsx` | `AppProvider`: загружает справочники для форм и хранит счётчик `version`. После любого действия вызывается `refresh()`, и хук `useLoad` заново загружает данные во всех таблицах |
-| `pages/orders/OrdersPage.tsx` | таблица заказов, поиск, фильтр по статусу |
-| `pages/orders/OrderForm.tsx` | форма заказа; живой расчёт цены через `/api/orders/quote` (с задержкой 250 мс) |
-| `pages/orders/OrderDetails.tsx` | карточка заказа: цена, история, кнопки действий |
-| `pages/CustomersPage.tsx`, `CouriersPage.tsx` | справочники с добавлением, изменением, удалением |
-| `pages/ActivityPage.tsx`, `ReportPage.tsx` | журнал и отчёт с выгрузкой |
-| `components/common.tsx` | общие куски: поле с ошибкой, выпадающий список, бейдж статуса |
+| `lib/api.ts` | типы данных и все запросы к серверу |
+| `lib/app.tsx` | справочники для форм и `refresh()` — после действия все таблицы перезагружаются |
+| `pages/orders/*` | таблица заказов, форма заказа (с живым расчётом цены), карточка заказа |
+| `pages/CustomersPage.tsx`, `CouriersPage.tsx` | клиенты и курьеры |
+| `pages/ActivityPage.tsx`, `ReportPage.tsx` | журнал и отчёт |
 
-Фронтенд **не содержит бизнес-правил**. Какие кнопки показать, решает сервер
-(`nextStatuses`, `editable`, `deletable`), цену тоже считает сервер.
+Бизнес-правил на фронтенде нет: какие кнопки показать и сколько стоит заказ, решает сервер.
 
 ---
 
@@ -424,26 +358,22 @@ cd backend && go test ./... -v
 
 | Файл | Что проверяет |
 |---|---|
-| `domain/domain_test.go` | Builder (корректный и 6 неверных случаев), Strategy цены, Decorator, переходы статусов, Strategy курьера |
-| `application/facade_test.go` | полный сценарий + Observer (с поддельным `fakeNotifier`), сохранение и загрузка, бизнес-правила |
-| `adapters/out/notify/sms_test.go` | Adapter: формат номера, обрезка текста, код ошибки → `error` |
-
-`t.TempDir()` создаёт временную папку для данных — тесты не трогают настоящий `backend/data`.
-`fakeNotifier` подставляется вместо SMS — так видно пользу порта `Notifier`.
+| `domain/domain_test.go` | Builder, обе Strategy, Decorator, правила статусов (Factory Method) |
+| `application/facade_test.go` | полный сценарий + Observer, сохранение и перезапуск, бизнес-правила |
+| `adapters/out/notify/sms_test.go` | Adapter |
 
 ---
 
-## 9. Типичные правки на защите — что менять
+## 9. Что могут попросить изменить на защите
 
 | Попросят | Что сделать |
 |---|---|
-| **Новая стратегия цены** (например, «фиксированная 1500 ₸») | В `domain/pricing.go`: новый тип с `Code`, `Title`, `Calculate` → добавить в `pricingStrategies`. В форме появится сам. |
-| **Новая стратегия курьера** (например, «по алфавиту») | В `domain/courier_selection.go`: тип с `Select` → добавить в `courierSelectors`. |
-| **Новая доп. услуга** (например, «подарочная упаковка +300 ₸») | В `domain/price.go`: тип-обёртка с `inner`, `Total`, `Lines` → запись в `extras` (до `express`). |
-| **Новый способ доставки** (например, «самовывоз со склада») | В `domain/delivery.go`: новый продукт + новый `Creator` → добавить в `deliveryTypes` и `deliveryCreators`. |
-| **Новый наблюдатель** (например, «писать в консоль») | Тип с методом `Update(e events.Event)` → `publisher.Subscribe(...)` в `main.go`. |
-| **Новый канал уведомлений** (email) | В `adapters/out/notify`: тип с `Notify(port.Notification) error` → передать его вместо `sms` в `main.go`. |
-| **Новое правило** (например, «вес не больше 40 кг для двери») | Поменять `MaxWeightKg()` у `doorDelivery` в `delivery.go`. |
-| **Новое поле в форме** | `domain.Order` + `OrderBuilder` → `command.OrderInput` → `frontend/src/lib/api.ts` → `OrderForm.tsx`. |
+| Новая стратегия цены | `domain/pricing.go`: тип с `Code`, `Title`, `Calculate` → добавить в `PricingStrategies` |
+| Новая стратегия курьера | `domain/courier_selection.go`: тип с `Select` → добавить в `CourierSelectors` |
+| Новая доп. услуга (Decorator) | `domain/price.go`: тип-обёртка с `Total` и `Lines` → `case` в `wrap` → запись в `Extras` |
+| Новый способ доставки | `domain/delivery.go`: новый продукт + новый `Creator` → в `creators` и `DeliveryTypes` |
+| Новый наблюдатель | тип с методом `Update(e events.Event)` → `publisher.Subscribe(...)` в `main.go` |
+| Email вместо SMS | `adapters/out/notify`: тип с `Notify(port.Notification) error` → передать в `main.go` |
+| Новый лимит веса | `MaxWeightKg()` нужного способа в `delivery.go` |
 
-После любой правки: `go test ./...` и перезапуск сервера.
+После правки: `go test ./...` и перезапуск сервера.

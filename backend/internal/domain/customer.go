@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// Customer — клиент, который отправляет или получает посылку.
+// Customer — клиент, которому везут посылку.
 type Customer struct {
 	ID        string    `json:"id"`
 	Name      string    `json:"name"`
@@ -25,8 +25,8 @@ func (c *Customer) Update(name, phone string) error {
 	name = strings.TrimSpace(name)
 	phone = NormalizePhone(phone)
 
-	var errs ValidationError
-	validateContact(&errs, name, phone)
+	errs := ValidationError{}
+	checkContact(errs, name, phone)
 	if err := errs.OrNil(); err != nil {
 		return err
 	}

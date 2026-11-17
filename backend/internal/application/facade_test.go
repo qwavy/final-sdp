@@ -43,7 +43,7 @@ func newTestApp(t *testing.T, dir string) *testApp {
 	facade := application.NewDeliveryFacade(application.Deps{
 		Orders: store.Orders, Customers: store.Customers, Couriers: store.Couriers,
 		PickupPoints: store.PickupPoints, Activity: store.Activity, Exports: store.Exports,
-		Events: publisher, Clock: time.Now,
+		Publisher: publisher,
 	})
 	return &testApp{facade: facade, store: store, notifier: notifier}
 }
@@ -58,7 +58,7 @@ func (a *testApp) seedBasics(t *testing.T) {
 	if _, err := a.facade.CreateCourier(command.CourierInput{Name: "Асхат", Phone: "+77015550001", District: "almaly", Capacity: 2}); err != nil {
 		t.Fatal(err)
 	}
-	point, _ := domain.NewPickupPoint("ПВЗ Абая", "Абая 52", "almaly", domain.DeliveryPickupPoint)
+	point := domain.NewPickupPoint("ПВЗ Абая", "Абая 52", "almaly", domain.DeliveryPickupPoint)
 	if err := a.store.PickupPoints.Save(point); err != nil {
 		t.Fatal(err)
 	}
@@ -143,10 +143,10 @@ func TestBusinessRulesAreEnforced(t *testing.T) {
 	order, _ := app.facade.CreateOrder(app.pickupOrder())
 	_, _ = app.facade.AssignCourier(order.ID, "least_loaded")
 
-	if err := app.facade.DeleteCustomer(app.customer); !errors.Is(err, domain.ErrRuleViolation) {
+	if err := app.facade.DeleteCustomer(app.customer); !errors.Is(err, domain.ErrRule) {
 		t.Fatalf("удаление клиента с активным заказом: ожидали отказ, получили %v", err)
 	}
-	if _, err := app.facade.UpdateOrder(order.ID, app.pickupOrder()); !errors.Is(err, domain.ErrRuleViolation) {
+	if _, err := app.facade.UpdateOrder(order.ID, app.pickupOrder()); !errors.Is(err, domain.ErrRule) {
 		t.Fatalf("изменение назначенного заказа: ожидали отказ, получили %v", err)
 	}
 	if _, err := app.facade.CreateCustomer(command.CustomerInput{Name: "Дубль", Phone: "+77011234567"}); err == nil {

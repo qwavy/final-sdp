@@ -1,16 +1,10 @@
 package domain
 
-import (
-	"cmp"
-	"slices"
-	"strings"
-)
-
-// ПАТТЕРН STRATEGY (выбор курьера)
+// ПАТТЕРН STRATEGY — выбор курьера.
 //
 // Strategy         — CourierSelector.
-// ConcreteStrategy — NearestCourierSelector, LeastLoadedCourierSelector.
-// Context          — команда AssignCourier: пользователь выбирает стратегию кнопкой.
+// ConcreteStrategy — NearestCourier, LeastLoadedCourier.
+// Пользователь выбирает стратегию перед кнопкой «Назначить курьера».
 
 type CourierSelector interface {
 	Code() string
@@ -18,74 +12,58 @@ type CourierSelector interface {
 	Select(order *Order, couriers []*Courier) (*Courier, error)
 }
 
-// NearestCourierSelector — ближайший к адресу заказа свободный курьер.
-type NearestCourierSelector struct{}
+// NearestCourier — ближайший к адресу заказа свободный курьер.
+type NearestCourier struct{}
 
-func (NearestCourierSelector) Code() string  { return "nearest" }
-func (NearestCourierSelector) Title() string { return "Ближайший курьер" }
+func (NearestCourier) Code() string  { return "nearest" }
+func (NearestCourier) Title() string { return "Ближайший курьер" }
 
-func (NearestCourierSelector) Select(order *Order, couriers []*Courier) (*Courier, error) {
-	free := freeCouriers(couriers)
-	if len(free) == 0 {
-		return nil, errNoFreeCourier()
+func (NearestCourier) Select(order *Order, couriers []*Courier) (*Courier, error) {
+	var best *Courier
+	for _, c := range couriers {
+		if !c.HasCapacity() {
+			continue
+		}
+		if best == nil || DistanceBetween(c.District, order.District) < DistanceBetween(best.District, order.District) {
+			best = c
+		}
 	}
-	return slices.MinFunc(free, func(a, b *Courier) int {
-		return cmp.Or(
-			cmp.Compare(distanceBetween(a.District, order.District), distanceBetween(b.District, order.District)),
-			cmp.Compare(a.ActiveOrders, b.ActiveOrders),
-			strings.Compare(a.Name, b.Name),
-		)
-	}), nil
-}
-
-// LeastLoadedCourierSelector — курьер с наименьшим числом активных заказов.
-type LeastLoadedCourierSelector struct{}
-
-func (LeastLoadedCourierSelector) Code() string  { return "least_loaded" }
-func (LeastLoadedCourierSelector) Title() string { return "Наименее загруженный" }
-
-func (LeastLoadedCourierSelector) Select(order *Order, couriers []*Courier) (*Courier, error) {
-	free := freeCouriers(couriers)
-	if len(free) == 0 {
-		return nil, errNoFreeCourier()
+	if best == nil {
+		return nil, RuleViolation("нет свободных курьеров")
 	}
-	return slices.MinFunc(free, func(a, b *Courier) int {
-		return cmp.Or(
-			cmp.Compare(a.ActiveOrders, b.ActiveOrders),
-			cmp.Compare(distanceBetween(a.District, order.District), distanceBetween(b.District, order.District)),
-			strings.Compare(a.Name, b.Name),
-		)
-	}), nil
+	return best, nil
 }
 
-var courierSelectors = []CourierSelector{
-	NearestCourierSelector{},
-	LeastLoadedCourierSelector{},
+// LeastLoadedCourier — свободный курьер с наименьшим числом заказов.
+type LeastLoadedCourier struct{}
+
+func (LeastLoadedCourier) Code() string  { return "least_loaded" }
+func (LeastLoadedCourier) Title() string { return "Наименее загруженный" }
+
+func (LeastLoadedCourier) Select(_ *Order, couriers []*Courier) (*Courier, error) {
+	var best *Courier
+	for _, c := range couriers {
+		if !c.HasCapacity() {
+			continue
+		}
+		if best == nil || c.ActiveOrders < best.ActiveOrders {
+			best = c
+		}
+	}
+	if best == nil {
+		return nil, RuleViolation("нет свободных курьеров")
+	}
+	return best, nil
 }
 
-func CourierSelectors() []CourierSelector {
-	return append([]CourierSelector(nil), courierSelectors...)
-}
+// CourierSelectors — все стратегии выбора курьера.
+var CourierSelectors = []CourierSelector{NearestCourier{}, LeastLoadedCourier{}}
 
 func CourierSelectorByCode(code string) (CourierSelector, error) {
-	for _, s := range courierSelectors {
+	for _, s := range CourierSelectors {
 		if s.Code() == code {
 			return s, nil
 		}
 	}
 	return nil, RuleViolation("неизвестный способ выбора курьера %q", code)
-}
-
-func freeCouriers(couriers []*Courier) []*Courier {
-	var free []*Courier
-	for _, c := range couriers {
-		if c.HasCapacity() {
-			free = append(free, c)
-		}
-	}
-	return free
-}
-
-func errNoFreeCourier() error {
-	return RuleViolation("нет свободных курьеров: все заняты полностью")
 }

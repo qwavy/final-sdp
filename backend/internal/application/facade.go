@@ -1,15 +1,14 @@
 // Package application — ПАТТЕРН FACADE.
 //
-// Facade     — DeliveryFacade: единственная точка входа для интерфейса (HTTP).
-// Subsystem  — команды (command), запросы (query), репозитории, наблюдатели.
+// Facade    — DeliveryFacade: единственная точка входа для HTTP.
+// Subsystem — команды (command), запросы (query), хранилище, наблюдатели.
 //
-// HTTP-обработчик вызывает один метод, например CreateOrder, а фасад внутри
-// выполняет команду, затем запрос для показа результата. Интерфейс не знает
-// о командах, запросах и хранилище — их можно менять, не трогая HTTP.
+// HTTP вызывает один метод, например CreateOrder. Фасад внутри выполняет
+// команду (изменить данные), а затем запрос (прочитать результат для ответа).
 package application
 
 import (
-	"fmt"
+	"encoding/json"
 	"time"
 
 	"parcelhub/internal/application/events"
@@ -27,8 +26,7 @@ type Deps struct {
 	PickupPoints port.PickupPointRepository
 	Activity     port.ActivityRepository
 	Exports      port.ExportStore
-	Events       *events.Publisher
-	Clock        func() time.Time
+	Publisher    *events.Publisher
 }
 
 type DeliveryFacade struct {
@@ -37,33 +35,26 @@ type DeliveryFacade struct {
 	courierCmd  *command.CourierCommands
 	orders      *query.OrderQueries
 	directory   *query.DirectoryQueries
-	reports     *query.ReportQueries
 	exports     port.ExportStore
 }
 
 func NewDeliveryFacade(d Deps) *DeliveryFacade {
-	if d.Clock == nil {
-		d.Clock = time.Now
-	}
 	return &DeliveryFacade{
-		orderCmd:    command.NewOrderCommands(d.Orders, d.Customers, d.Couriers, d.PickupPoints, d.Events, d.Clock),
-		customerCmd: command.NewCustomerCommands(d.Customers, d.Orders, d.Clock),
-		courierCmd:  command.NewCourierCommands(d.Couriers, d.Clock),
+		orderCmd:    command.NewOrderCommands(d.Orders, d.Customers, d.Couriers, d.PickupPoints, d.Publisher, time.Now),
+		customerCmd: command.NewCustomerCommands(d.Customers, d.Orders, time.Now),
+		courierCmd:  command.NewCourierCommands(d.Couriers, time.Now),
 		orders:      query.NewOrderQueries(d.Orders, d.Customers, d.Couriers, d.PickupPoints),
 		directory:   query.NewDirectoryQueries(d.Customers, d.Couriers, d.PickupPoints, d.Orders, d.Activity),
-		reports:     query.NewReportQueries(d.Orders, d.Customers, d.Couriers, d.PickupPoints, d.Clock),
 		exports:     d.Exports,
 	}
 }
-
-// --- Справочники ---
 
 func (f *DeliveryFacade) Options() query.Options { return query.CatalogOptions() }
 
 // --- Заказы ---
 
-func (f *DeliveryFacade) ListOrders(filter query.OrderFilter) ([]query.OrderView, error) {
-	return f.orders.List(filter)
+func (f *DeliveryFacade) ListOrders(status, search string) ([]query.OrderView, error) {
+	return f.orders.List(status, search)
 }
 
 func (f *DeliveryFacade) GetOrder(id string) (query.OrderView, error) { return f.orders.Get(id) }
@@ -89,18 +80,18 @@ func (f *DeliveryFacade) UpdateOrder(id string, in command.OrderInput) (query.Or
 
 func (f *DeliveryFacade) DeleteOrder(id string) error { return f.orderCmd.Delete(id) }
 
-func (f *DeliveryFacade) AssignCourier(orderID, selector string) (query.OrderView, error) {
-	if err := f.orderCmd.AssignCourier(orderID, selector); err != nil {
+func (f *DeliveryFacade) AssignCourier(id, selector string) (query.OrderView, error) {
+	if err := f.orderCmd.AssignCourier(id, selector); err != nil {
 		return query.OrderView{}, err
 	}
-	return f.orders.Get(orderID)
+	return f.orders.Get(id)
 }
 
-func (f *DeliveryFacade) ChangeOrderStatus(orderID, status string) (query.OrderView, error) {
-	if err := f.orderCmd.ChangeStatus(orderID, status); err != nil {
+func (f *DeliveryFacade) ChangeOrderStatus(id, status string) (query.OrderView, error) {
+	if err := f.orderCmd.ChangeStatus(id, status); err != nil {
 		return query.OrderView{}, err
 	}
-	return f.orders.Get(orderID)
+	return f.orders.Get(id)
 }
 
 // --- Клиенты ---
@@ -147,7 +138,7 @@ func (f *DeliveryFacade) UpdateCourier(id string, in command.CourierInput) (quer
 
 func (f *DeliveryFacade) DeleteCourier(id string) error { return f.courierCmd.Delete(id) }
 
-// --- Точки выдачи и журнал ---
+// --- Точки выдачи, журнал, отчёт ---
 
 func (f *DeliveryFacade) ListPickupPoints() ([]query.PickupPointView, error) {
 	return f.directory.PickupPoints()
@@ -157,41 +148,31 @@ func (f *DeliveryFacade) Activity(limit int) ([]port.ActivityEntry, error) {
 	return f.directory.Activity(limit)
 }
 
-// --- Отчёт ---
-
 func (f *DeliveryFacade) DailyReport(day time.Time) (query.DailyReport, error) {
-	return f.reports.Daily(day)
+	return f.orders.DailyReport(day)
 }
 
-type ExportedFile struct {
-	Name        string
-	ContentType string
-	Data        []byte
-	SavedTo     string
-}
-
-// ExportDailyReport строит отчёт, переводит в CSV/JSON и сохраняет копию на диск.
-func (f *DeliveryFacade) ExportDailyReport(day time.Time, format string) (ExportedFile, error) {
-	report, err := f.reports.Daily(day)
+// ExportDailyReport — отчёт в CSV или JSON; копия сохраняется на диск.
+// Возвращает имя файла и содержимое.
+func (f *DeliveryFacade) ExportDailyReport(day time.Time, format string) (string, []byte, error) {
+	report, err := f.orders.DailyReport(day)
 	if err != nil {
-		return ExportedFile{}, err
+		return "", nil, err
 	}
 
-	file := ExportedFile{Name: fmt.Sprintf("report-%s.%s", report.Date, format)}
+	var data []byte
 	switch format {
 	case "csv":
-		file.ContentType = "text/csv; charset=utf-8"
-		file.Data, err = report.CSV()
+		data = report.CSV()
 	case "json":
-		file.ContentType = "application/json"
-		file.Data, err = report.JSON()
+		data, _ = json.MarshalIndent(report, "", "  ")
 	default:
-		return ExportedFile{}, domain.RuleViolation("формат выгрузки: csv или json")
-	}
-	if err != nil {
-		return ExportedFile{}, err
+		return "", nil, domain.RuleViolation("формат выгрузки: csv или json")
 	}
 
-	file.SavedTo, err = f.exports.SaveExport(file.Name, file.Data)
-	return file, err
+	name := "report-" + report.Date + "." + format
+	if err := f.exports.SaveExport(name, data); err != nil {
+		return "", nil, err
+	}
+	return name, data, nil
 }

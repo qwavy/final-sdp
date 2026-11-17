@@ -78,9 +78,7 @@ func (c *CustomerCommands) ensureUniquePhone(customer *domain.Customer) error {
 	}
 	for _, other := range all {
 		if other.ID != customer.ID && other.Phone == customer.Phone {
-			err := &domain.ValidationError{}
-			err.Add("phone", "клиент с таким телефоном уже есть: "+other.Name)
-			return err
+			return domain.ValidationError{"phone": "клиент с таким телефоном уже есть: " + other.Name}
 		}
 	}
 	return nil

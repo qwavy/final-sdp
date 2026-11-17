@@ -5,15 +5,14 @@ import (
 	"slices"
 	"strings"
 	"time"
-	"unicode/utf8"
 )
 
 // ПАТТЕРН BUILDER
 //
-// Builder — OrderBuilder. У заказа много полей, часть из них зависит от способа
-// доставки (адрес или пункт выдачи). Builder собирает заказ по шагам, а Build()
-// проверяет всё сразу, считает расстояние и цену и выдаёт готовый заказ
-// в корректном состоянии — или список ошибок по полям.
+// У заказа много полей, и часть зависит от способа доставки
+// (адрес — для двери, точка выдачи — для ПВЗ и постамата).
+// OrderBuilder собирает заказ по шагам, а Build() проверяет всё сразу
+// и выдаёт готовый заказ — или ошибки по полям.
 //
 //	order, err := NewOrderBuilder().
 //		ForCustomer("CUS-1").
@@ -21,10 +20,8 @@ import (
 //		Delivery(DeliveryLocker).
 //		ToPickupPoint(point).
 //		PricedBy("by_weight").
-//		WithExtras(ExtraFragile).
+//		WithExtras("fragile").
 //		Build(time.Now())
-
-const MaxDeclaredValue Money = 5_000_000
 
 type OrderBuilder struct {
 	order       Order
@@ -32,10 +29,12 @@ type OrderBuilder struct {
 	errs        ValidationError
 }
 
-func NewOrderBuilder() *OrderBuilder { return &OrderBuilder{} }
+func NewOrderBuilder() *OrderBuilder {
+	return &OrderBuilder{errs: ValidationError{}}
+}
 
 func (b *OrderBuilder) ForCustomer(customerID string) *OrderBuilder {
-	b.order.CustomerID = strings.TrimSpace(customerID)
+	b.order.CustomerID = customerID
 	return b
 }
 
@@ -51,21 +50,21 @@ func (b *OrderBuilder) Delivery(t DeliveryType) *OrderBuilder {
 	return b
 }
 
-// ToAddress — адрес для доставки до двери.
-func (b *OrderBuilder) ToAddress(address, districtCode string) *OrderBuilder {
+// ToAddress — для доставки до двери.
+func (b *OrderBuilder) ToAddress(address, district string) *OrderBuilder {
 	b.order.Address = strings.TrimSpace(address)
-	b.order.District = districtCode
+	b.order.District = district
 	return b
 }
 
-// ToPickupPoint — пункт выдачи или постамат.
+// ToPickupPoint — для ПВЗ или постамата.
 func (b *OrderBuilder) ToPickupPoint(p *PickupPoint) *OrderBuilder {
 	b.pickupPoint = p
 	return b
 }
 
-func (b *OrderBuilder) PricedBy(strategyCode string) *OrderBuilder {
-	b.order.PricingStrategy = strategyCode
+func (b *OrderBuilder) PricedBy(strategy string) *OrderBuilder {
+	b.order.PricingStrategy = strategy
 	return b
 }
 
@@ -74,55 +73,54 @@ func (b *OrderBuilder) WithExtras(codes ...string) *OrderBuilder {
 	return b
 }
 
-// Invalid добавляет ошибку, найденную снаружи (например, «клиент не найден»).
+// Invalid — ошибка, найденная снаружи (например, «клиент не найден»).
 func (b *OrderBuilder) Invalid(field, message string) *OrderBuilder {
-	b.errs.Add(field, message)
+	b.errs[field] = message
 	return b
 }
 
+// Build проверяет все поля, считает расстояние и цену.
 func (b *OrderBuilder) Build(now time.Time) (*Order, error) {
 	o := b.order
-	errs := ValidationError{Fields: slices.Clone(b.errs.Fields)}
+	errs := b.errs
 
-	if o.CustomerID == "" && !errs.Has("customerId") {
-		errs.Add("customerId", "выберите клиента")
+	if o.CustomerID == "" && errs["customerId"] == "" {
+		errs["customerId"] = "выберите клиента"
 	}
-	switch {
-	case o.Description == "":
-		errs.Add("description", "опишите содержимое посылки")
-	case utf8.RuneCountInString(o.Description) > 200:
-		errs.Add("description", "описание не длиннее 200 символов")
+	if o.Description == "" {
+		errs["description"] = "опишите содержимое посылки"
 	}
-	if o.DeclaredValue < 0 || o.DeclaredValue > MaxDeclaredValue {
-		errs.Add("declaredValue", fmt.Sprintf("ценность от 0 до %d ₸", MaxDeclaredValue))
+	if o.DeclaredValue < 0 {
+		errs["declaredValue"] = "ценность не может быть меньше 0"
+	}
+	if slices.Contains(o.Extras, ExtraInsurance) && o.DeclaredValue <= 0 {
+		errs["declaredValue"] = "для страховки укажите объявленную ценность"
+	}
+	if _, err := PricingStrategyByCode(o.PricingStrategy); err != nil {
+		errs["pricingStrategy"] = "выберите способ расчёта цены"
 	}
 
 	method, err := NewDeliveryMethod(o.DeliveryType)
 	if err != nil {
-		errs.Add("deliveryType", "выберите способ доставки")
+		errs["deliveryType"] = "выберите способ доставки"
 	}
-	switch {
-	case o.WeightKg <= 0:
-		errs.Add("weightKg", "вес должен быть больше 0")
-	case method != nil && o.WeightKg > method.MaxWeightKg():
-		errs.Add("weightKg", fmt.Sprintf("для способа «%s» максимум %.0f кг", method.Title(), method.MaxWeightKg()))
+	if o.WeightKg <= 0 {
+		errs["weightKg"] = "вес должен быть больше 0"
+	} else if method != nil && o.WeightKg > method.MaxWeightKg() {
+		errs["weightKg"] = fmt.Sprintf("для «%s» максимум %.0f кг", method.Title(), method.MaxWeightKg())
 	}
 	if method != nil {
-		b.resolveDestination(&o, method, &errs)
+		b.checkDestination(&o, method, errs)
 	}
-	if _, err := PricingStrategyByCode(o.PricingStrategy); err != nil {
-		errs.Add("pricingStrategy", "выберите способ расчёта цены")
-	}
-	o.Extras = validateExtras(o.Extras, o.DeclaredValue, &errs)
 
 	if err := errs.OrNil(); err != nil {
 		return nil, err
 	}
 
 	o.DistanceKm, _ = DistanceFromHub(o.District)
-	price, err := BuildPrice(QuoteSpec{
-		DeliveryType:  o.DeliveryType,
-		PricingCode:   o.PricingStrategy,
+	price, err := CalculatePrice(PriceInput{
+		Delivery:      o.DeliveryType,
+		Strategy:      o.PricingStrategy,
 		WeightKg:      o.WeightKg,
 		DistanceKm:    o.DistanceKm,
 		DeclaredValue: o.DeclaredValue,
@@ -137,19 +135,20 @@ func (b *OrderBuilder) Build(now time.Time) (*Order, error) {
 	o.ID = NewID("ORD")
 	o.Status = StatusCreated
 	o.History = []StatusChange{{To: StatusCreated, At: now}}
-	o.CreatedAt, o.UpdatedAt = now, now
+	o.CreatedAt = now
+	o.UpdatedAt = now
 	return &o, nil
 }
 
-// resolveDestination: для ПВЗ/постамата берём точку выдачи, для курьера — адрес и район.
-func (b *OrderBuilder) resolveDestination(o *Order, method DeliveryMethod, errs *ValidationError) {
+// checkDestination: для двери нужен адрес и район, для ПВЗ/постамата — подходящая точка.
+func (b *OrderBuilder) checkDestination(o *Order, method DeliveryMethod, errs ValidationError) {
 	if !method.NeedsPickupPoint() {
 		o.PickupPointID = ""
 		if o.Address == "" {
-			errs.Add("address", "укажите адрес")
+			errs["address"] = "укажите адрес"
 		}
 		if _, ok := FindDistrict(o.District); !ok {
-			errs.Add("district", "выберите район")
+			errs["district"] = "выберите район"
 		}
 		return
 	}
@@ -158,31 +157,13 @@ func (b *OrderBuilder) resolveDestination(o *Order, method DeliveryMethod, errs 
 	p := b.pickupPoint
 	switch {
 	case p == nil:
-		if !errs.Has("pickupPointId") {
-			errs.Add("pickupPointId", "выберите точку выдачи")
+		if errs["pickupPointId"] == "" {
+			errs["pickupPointId"] = "выберите точку выдачи"
 		}
 	case p.Kind != method.Type():
-		errs.Add("pickupPointId", fmt.Sprintf("«%s» не подходит для способа «%s»", p.Name, method.Title()))
+		errs["pickupPointId"] = fmt.Sprintf("«%s» не подходит для способа «%s»", p.Name, method.Title())
 	default:
 		o.PickupPointID = p.ID
 		o.District = p.District
 	}
-}
-
-func validateExtras(codes []string, declared Money, errs *ValidationError) []string {
-	result := make([]string, 0, len(codes))
-	for _, code := range codes {
-		if slices.Contains(result, code) {
-			continue
-		}
-		if _, ok := FindExtra(code); !ok {
-			errs.Add("extras", fmt.Sprintf("неизвестная услуга %q", code))
-			continue
-		}
-		result = append(result, code)
-	}
-	if slices.Contains(result, ExtraInsurance) && declared <= 0 {
-		errs.Add("declaredValue", "для страховки укажите объявленную ценность")
-	}
-	return result
 }

@@ -82,12 +82,12 @@ Domain не знает ни о HTTP, ни о файлах.
 | Паттерн | Тип | Какую проблему решает | Главные типы | Как показать |
 |---|---|---|---|---|
 | Builder | порождающий | У заказа много полей, часть зависит от способа доставки; заказ должен создаваться только целиком корректным | `domain.OrderBuilder` | Отправить пустую форму заказа — все ошибки сразу по полям |
-| Factory Method | порождающий | Способы доставки отличаются тарифом, лимитом веса и цепочкой статусов | `DeliveryCreator`, `DeliveryMethod`, `DoorDeliveryCreator` … | Заказ «до двери» не проходит через «Ждёт в точке выдачи»; постамат не принимает > 15 кг |
+| Factory Method | порождающий | Способы доставки отличаются тарифом, лимитом веса и цепочкой статусов | `DeliveryCreator`, `DeliveryMethod`, `DoorCreator` … | Заказ «до двери» не проходит через «Ждёт в точке выдачи»; постамат не принимает > 15 кг |
 | Decorator | структурный | Доп. услуги в любой комбинации добавляются к цене | `PriceComponent`, `basePrice`, `insuranceExtra`, `fragileExtra`, `expressExtra` | Отмечать услуги в форме — строки расшифровки и итог меняются |
 | Facade | структурный | HTTP не должен знать о командах, запросах и хранилище | `application.DeliveryFacade` | Любой обработчик в `adapters/in/http/handlers.go` вызывает один метод фасада |
-| Adapter | структурный | Сторонний SMS-шлюз имеет несовместимый интерфейс | `port.Notifier` ← `notify.SmsNotifier` → `notify.SmsGatewayClient` | Сменить статус — запись в `data/sms_outbox.jsonl` и в журнале |
+| Adapter | структурный | Сторонний SMS-шлюз имеет несовместимый интерфейс | `port.Notifier` ← `notify.SmsNotifier` → `notify.SmsGateway` | Сменить статус — строка в `data/sms_outbox.txt` и запись в журнале |
 | Strategy | поведенческий | Пользователь выбирает способ расчёта цены и способ выбора курьера | `PricingStrategy` (`WeightPricing`, `DistancePricing`), `CourierSelector` (`Nearest…`, `LeastLoaded…`) | В форме две цены рядом; в заказе выбор «Ближайший / Наименее загруженный» |
-| Observer | поведенческий | Смена статуса должна вызывать несколько независимых реакций | `events.Publisher`, `Observer`, `ActivityRecorder`, `CustomerNotifier` | Сменить статус — в журнале появляются событие и SMS, строка в `data/sms_outbox.jsonl` |
+| Observer | поведенческий | Смена статуса должна вызывать несколько независимых реакций | `events.Publisher`, `Observer`, `ActivityRecorder`, `CustomerNotifier` | Сменить статус — в журнале появляются событие и SMS, строка в `data/sms_outbox.txt` |
 
 ## API (кратко)
 
