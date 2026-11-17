@@ -1,0 +1,77 @@
+classDiagram
+  direction LR
+
+  class api {
+    <<adapter in: HTTP>>
+    +createOrder(r)
+    +assignCourier(r)
+    +changeStatus(r)
+  }
+  class DeliveryFacade {
+    <<Facade>>
+    +CreateOrder(in) OrderView
+    +AssignCourier(id, selector) OrderView
+    +ChangeOrderStatus(id, status) OrderView
+    +DailyReport(day) DailyReport
+  }
+  class OrderCommands {
+    <<CQS command>>
+    +Create(in) string
+    +AssignCourier(id, selector) error
+    +ChangeStatus(id, status) error
+  }
+  class OrderQueries {
+    <<CQS query>>
+    +List(status, search) []OrderView
+    +Get(id) OrderView
+    +Quote(in) []QuoteOption
+    +DailyReport(day) DailyReport
+  }
+  class Repository~T~ {
+    <<interface, port>>
+    +List() []T
+    +Get(id) T
+    +Save(item) error
+    +Delete(id) error
+  }
+  class Collection~T~ {
+    <<adapter out: JSON file>>
+  }
+  class Publisher {
+    <<Subject>>
+    -observers []Observer
+    +Subscribe(o)
+    +Notify(e)
+  }
+  class Observer {
+    <<interface>>
+    +Update(e Event)
+  }
+  class ActivityRecorder
+  class CustomerNotifier
+  class Notifier {
+    <<interface, port>>
+    +Notify(n) error
+  }
+  class SmsNotifier {
+    <<Adapter>>
+    +Notify(n) error
+  }
+  class SmsGateway {
+    <<Adaptee>>
+    +Send(number, text) int
+  }
+
+  api --> DeliveryFacade
+  DeliveryFacade --> OrderCommands
+  DeliveryFacade --> OrderQueries
+  OrderCommands --> Repository~T~
+  OrderQueries --> Repository~T~
+  Collection~T~ ..|> Repository~T~
+  OrderCommands --> Publisher : Notify
+  Publisher o-- Observer
+  ActivityRecorder ..|> Observer
+  CustomerNotifier ..|> Observer
+  CustomerNotifier --> Notifier
+  SmsNotifier ..|> Notifier
+  SmsNotifier --> SmsGateway

@@ -1,0 +1,543 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Parcel Hub — Final Project Report</title>
+<style>
+  @page { size: A4; margin: 18mm 16mm 18mm 16mm; }
+  * { box-sizing: border-box; }
+  body { font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; font-size: 10.5pt; line-height: 1.45; color: #1b1b1b; margin: 0; }
+  h1 { font-size: 20pt; margin: 0 0 6pt; }
+  h2 { font-size: 15pt; margin: 22pt 0 8pt; padding-bottom: 4pt; border-bottom: 1.5pt solid #1b1b1b; break-after: avoid; }
+  h3 { font-size: 12pt; margin: 16pt 0 6pt; break-after: avoid; }
+  h4 { font-size: 10.5pt; margin: 10pt 0 4pt; break-after: avoid; }
+  p { margin: 0 0 7pt; }
+  ul, ol { margin: 0 0 8pt; padding-left: 18pt; }
+  li { margin-bottom: 2pt; }
+  code { font-family: Menlo, Consolas, monospace; font-size: 8.8pt; background: #f2f2f2; padding: 0 2pt; border-radius: 2pt; }
+  pre { font-family: Menlo, Consolas, monospace; font-size: 8.2pt; line-height: 1.38; background: #f6f6f6; border: 0.6pt solid #ddd; border-left: 2.5pt solid #555; padding: 7pt 9pt; margin: 4pt 0 10pt; white-space: pre-wrap; break-inside: avoid; }
+  pre code { background: none; padding: 0; font-size: inherit; }
+  table { width: 100%; border-collapse: collapse; margin: 4pt 0 12pt; font-size: 9pt; }
+  th, td { border: 0.6pt solid #bbb; padding: 4pt 5pt; text-align: left; vertical-align: top; }
+  th { background: #eee; }
+  tr { break-inside: avoid; }
+  figure { margin: 8pt 0 14pt; break-inside: avoid; text-align: center; }
+  figure img { max-width: 100%; border: 0.6pt solid #ccc; }
+  figcaption { font-size: 9pt; color: #555; margin-top: 4pt; }
+  .muted { color: #666; }
+  .page-break { break-before: page; }
+  figure img { max-height: 112mm; }
+  .diagram { break-before: page; }
+  .diagram figure img { border: none; width: 100%; max-height: none; }
+  /* широкие диаграммы поворачиваем на 90°, чтобы занять всю страницу */
+  .rotated { break-before: page; height: 255mm; position: relative; }
+  .rotated .inner { position: absolute; width: 250mm; top: 50%; left: 50%;
+                    transform: translate(-50%, -50%) rotate(90deg); text-align: center; }
+  .rotated .inner img { width: 100%; }
+  .title-page { height: 250mm; display: flex; flex-direction: column; justify-content: space-between; }
+  .title-top { text-align: center; padding-top: 30mm; }
+  .title-top .course { font-size: 12pt; letter-spacing: 0.5pt; text-transform: uppercase; color: #555; }
+  .title-top h1 { font-size: 28pt; margin: 16pt 0 6pt; }
+  .title-top .subtitle { font-size: 14pt; color: #333; }
+  .title-meta { margin: 0 auto 10mm; width: 120mm; font-size: 11pt; }
+  .title-meta td { border: none; padding: 3pt 0; }
+  .title-meta td:first-child { color: #666; width: 42mm; }
+  .toc ol { padding-left: 16pt; }
+  .toc li { margin-bottom: 3pt; }
+  .layers { display: grid; gap: 4pt; margin: 6pt 0 12pt; font-size: 9.5pt; }
+  .layer { border: 0.8pt solid #444; padding: 5pt 8pt; border-radius: 3pt; }
+  .layer b { display: inline-block; width: 38mm; }
+  .pass { color: #1a7f37; font-weight: bold; }
+</style>
+</head>
+<body>
+
+<!-- ============ TITLE PAGE ============ -->
+<section class="title-page">
+  <div class="title-top">
+    <div class="course">Software Design Patterns · Final Project</div>
+    <h1>Parcel Hub</h1>
+    <div class="subtitle">Pickup point &amp; courier delivery manager</div>
+  </div>
+  <table class="title-meta">
+    <tr><td>Student</td><td>Ramazanov Nursultan Ramazanovich</td></tr>
+    <tr><td>Group</td><td>SE-2519</td></tr>
+    <tr><td>Team</td><td>Individual project</td></tr>
+    <tr><td>Language</td><td>Go 1.25 (backend), React + TypeScript (UI)</td></tr>
+    <tr><td>Repository</td><td>https://github.com/qwavy/final-sdp</td></tr>
+    <tr><td>Date</td><td>November 2026</td></tr>
+  </table>
+</section>
+
+<!-- ============ CONTENTS ============ -->
+<section class="page-break toc">
+  <h2>Contents</h2>
+  <ol>
+    <li>Introduction</li>
+    <li>Main Body
+      <ol>
+        <li>Domain model</li>
+        <li>User scenarios</li>
+        <li>Architecture</li>
+        <li>Design patterns table</li>
+        <li>Pattern implementations (Go code)</li>
+        <li>UML diagrams</li>
+        <li>User interface</li>
+        <li>Testing</li>
+        <li>Individual contribution</li>
+      </ol>
+    </li>
+    <li>Conclusion</li>
+    <li>Future Work</li>
+    <li>Tools and materials used</li>
+    <li>Appendix: how to run</li>
+  </ol>
+</section>
+
+<!-- ============ 1. INTRODUCTION ============ -->
+<section class="page-break">
+  <h2>1. Introduction</h2>
+
+  <h3>Problem</h3>
+  <p>A parcel pickup point or a small courier service handles dozens of parcels every day. For each parcel the
+  operator has to calculate the delivery price, choose a courier, track where the parcel is, tell the customer
+  about changes, and at the end of the day know how many orders and how much money there were. Doing this
+  in a spreadsheet is slow and error-prone: prices are calculated by hand, statuses are changed in the wrong
+  order, and customers are not notified.</p>
+
+  <h3>Target users</h3>
+  <p>The operator of a pickup point or the dispatcher of a courier service.</p>
+
+  <h3>Solution</h3>
+  <p><b>Parcel Hub</b> is a web application that supports the complete user journey required by the task:</p>
+  <ol>
+    <li><b>Create</b> an order: customer, parcel description, weight, declared value.</li>
+    <li><b>Configure</b> it: delivery method (to the door / pickup point / parcel locker), extra services
+      (insurance, fragile, express) and the price calculation method (by weight / by distance).</li>
+    <li><b>Perform an action</b>: assign a courier (nearest / least loaded) and move the order through its statuses:
+      Created → Courier assigned → In transit → (Waiting at pickup point) → Delivered, or Cancelled.</li>
+    <li><b>View and save the result</b>: the daily report, exported to CSV or JSON.</li>
+  </ol>
+
+  <h3>Technologies</h3>
+  <ul>
+    <li><b>Backend:</b> Go 1.25, only the standard library (<code>net/http</code>, <code>encoding/json</code>, <code>testing</code>).
+      All business logic and all design patterns are implemented here.</li>
+    <li><b>Frontend:</b> React + TypeScript + Tailwind CSS + shadcn/ui. The UI only calls the REST API.</li>
+    <li><b>Storage:</b> JSON files (one file per entity type). Data survives a restart.</li>
+  </ul>
+</section>
+
+<!-- ============ 2. MAIN BODY ============ -->
+<section class="page-break">
+  <h2>2. Main Body</h2>
+
+  <h3>2.1 Domain model</h3>
+  <table>
+    <tr><th>Entity</th><th>Meaning</th><th>Relations</th></tr>
+    <tr><td><code>Order</code></td><td>Parcel delivery: description, weight, delivery method, extras, price, status, history</td><td>references Customer, Courier, PickupPoint</td></tr>
+    <tr><td><code>Customer</code></td><td>Name and phone of the recipient</td><td>has many orders</td></tr>
+    <tr><td><code>Courier</code></td><td>Name, phone, district, capacity (orders at the same time)</td><td>delivers many orders</td></tr>
+    <tr><td><code>PickupPoint</code></td><td>Pickup point or parcel locker with an address</td><td>receives many orders</td></tr>
+  </table>
+  <p>Main business rules (all checked in the <code>domain</code> package):</p>
+  <ul>
+    <li>An order can be created only fully valid (Builder validates every field).</li>
+    <li>Each delivery method has its own weight limit: door 50 kg, pickup point 30 kg, locker 15 kg.</li>
+    <li>Statuses change only along allowed transitions; door delivery never goes through “Waiting at pickup point”.</li>
+    <li>A courier cannot take more orders than his capacity.</li>
+    <li>Only a new order can be edited; only a new or finished order can be deleted.</li>
+    <li>A customer or courier with active orders cannot be deleted; customer phone numbers are unique.</li>
+    <li>Insurance requires a declared value greater than 0.</li>
+  </ul>
+
+  <h3>2.2 User scenarios</h3>
+  <table>
+    <tr><th>#</th><th>Scenario</th><th>Steps</th></tr>
+    <tr><td>1</td><td>Create an order</td><td>Orders → “New order” → fill the form → “Create order”. Invalid fields are highlighted.</td></tr>
+    <tr><td>2</td><td>Configure delivery and price</td><td>Choose delivery method, pickup point or address, extra services; compare the two prices calculated by different strategies and pick one.</td></tr>
+    <tr><td>3</td><td>Assign a courier</td><td>Open the order → choose “Nearest courier” or “Least loaded” → “Assign courier”.</td></tr>
+    <tr><td>4</td><td>Change status / cancel</td><td>Order card shows only allowed next statuses. Each change is logged and an SMS is sent to the customer.</td></tr>
+    <tr><td>5</td><td>Daily report</td><td>“Daily report” tab → totals, couriers’ load, list of orders → export to CSV or JSON.</td></tr>
+    <tr><td>6</td><td>Edit or delete an order</td><td>A new order can be edited (price is recalculated) or deleted.</td></tr>
+    <tr><td>7</td><td>Manage customers and couriers</td><td>Create, edit, delete; deleting someone with active orders is refused.</td></tr>
+    <tr><td>8</td><td>View activity log</td><td>“Activity log” tab shows every event and every SMS sent.</td></tr>
+  </table>
+</section>
+
+<section class="page-break">
+  <h3>2.3 Architecture</h3>
+  <p>The backend follows <b>hexagonal architecture</b> (ports &amp; adapters) with <b>CQS</b>
+  (command–query separation) in the application layer.</p>
+
+  <div class="layers">
+    <div class="layer"><b>adapters/in/http</b> REST API. Reads the request, calls the facade, writes JSON.</div>
+    <div class="layer"><b>application</b> <code>DeliveryFacade</code>; <code>use_cases/command</code> (change data);
+      <code>use_cases/query</code> (read data); <code>events</code> (Observer); <code>port</code> (interfaces).</div>
+    <div class="layer"><b>domain</b> Entities and rules; Builder, Factory Method, Strategy, Decorator.</div>
+    <div class="layer"><b>adapters/out</b> <code>storage</code> — JSON files; <code>notify</code> — SMS gateway (Adapter).</div>
+  </div>
+
+  <ul>
+    <li><b>Dependency rule:</b> <code>adapters → application → domain</code>. The domain imports nothing from other layers.</li>
+    <li><b>Ports:</b> the application declares what it needs as interfaces — <code>Repository[T]</code>,
+      <code>Notifier</code>, <code>ExportStore</code>. Adapters implement them. This is why storage or SMS can be replaced,
+      and why tests can use a fake notifier.</li>
+    <li><b>CQS:</b> commands (<code>OrderCommands</code>, <code>CustomerCommands</code>, <code>CourierCommands</code>) change
+      data and return only an error (or the new ID). Queries (<code>OrderQueries</code>, <code>DirectoryQueries</code>) only read
+      and build “views” for the UI.</li>
+    <li><b>Composition root:</b> <code>cmd/server/main.go</code> is the only place where all layers meet.</li>
+    <li><b>Error handling:</b> invalid input → <code>422</code> with errors per field; rule violation → <code>409</code>;
+      not found → <code>404</code>; malformed JSON or date → <code>400</code>.</li>
+  </ul>
+
+  <h4>Request flow (change status)</h4>
+<pre><code>POST /api/orders/{id}/status
+ → http handler          reads JSON
+ → DeliveryFacade        ChangeOrderStatus(id, status)
+    → OrderCommands      Get → order.ChangeStatus() (domain rule) → Save → publisher.Notify()
+         → ActivityRecorder.Update()   writes the activity log
+         → CustomerNotifier.Update()   sends SMS through the Notifier port
+    → OrderQueries       Get(id) → OrderView
+ ← 200 OK + JSON</code></pre>
+</section>
+
+<!-- ============ PATTERN TABLE ============ -->
+<section class="page-break">
+  <h3>2.4 Design patterns table</h3>
+  <p>Seven patterns are used (the task requires six): two creational, three structural, two behavioral.
+  All of them are part of one application and are visible in the UI.</p>
+  <table>
+    <tr><th style="width:13%">Pattern</th><th style="width:24%">Problem it solves</th><th style="width:25%">Main classes / interfaces</th><th style="width:25%">How to demonstrate it</th><th style="width:13%">Responsible student</th></tr>
+    <tr><td><b>Builder</b><br><span class="muted">creational</span></td><td>An order has many fields, some required only for one delivery method; an invalid order must be impossible to create</td><td><code>OrderBuilder</code></td><td>Submit an empty order form — every invalid field is highlighted</td><td>Ramazanov N.</td></tr>
+    <tr><td><b>Factory Method</b><br><span class="muted">creational</span></td><td>Delivery methods differ in fee, weight limit and status flow; avoid <code>switch</code> on the type everywhere</td><td><code>DeliveryCreator</code>, <code>DeliveryMethod</code>, <code>DoorCreator</code>, <code>PickupPointCreator</code>, <code>LockerCreator</code></td><td>16 kg to a locker → error “max 15 kg”; door order skips “Waiting at pickup point”</td><td>Ramazanov N.</td></tr>
+    <tr><td><b>Decorator</b><br><span class="muted">structural</span></td><td>Extra services can be combined in any way; one class per combination is impossible</td><td><code>PriceComponent</code>, <code>basePrice</code>, <code>insurance</code>, <code>fragile</code>, <code>express</code></td><td>Tick extra services in the form — price breakdown lines and total change</td><td>Ramazanov N.</td></tr>
+    <tr><td><b>Facade</b><br><span class="muted">structural</span></td><td>HTTP layer must not know about commands, queries, repositories, observers</td><td><code>DeliveryFacade</code></td><td>Every HTTP handler calls exactly one facade method</td><td>Ramazanov N.</td></tr>
+    <tr><td><b>Adapter</b><br><span class="muted">structural</span></td><td>Third-party SMS gateway has an incompatible interface (number without “+”, status codes instead of errors)</td><td><code>Notifier</code> (target), <code>SmsNotifier</code> (adapter), <code>SmsGateway</code> (adaptee)</td><td>Change a status — a line appears in <code>data/sms_outbox.txt</code> and in the activity log</td><td>Ramazanov N.</td></tr>
+    <tr><td><b>Strategy</b><br><span class="muted">behavioral</span></td><td>The user chooses how to calculate the price and how to choose a courier</td><td><code>PricingStrategy</code> (<code>WeightPricing</code>, <code>DistancePricing</code>), <code>CourierSelector</code> (<code>NearestCourier</code>, <code>LeastLoadedCourier</code>)</td><td>Two prices side by side in the form; strategy selector before “Assign courier”</td><td>Ramazanov N.</td></tr>
+    <tr><td><b>Observer</b><br><span class="muted">behavioral</span></td><td>A status change must trigger several independent reactions; the command must not know them</td><td><code>Publisher</code> (subject), <code>Observer</code>, <code>ActivityRecorder</code>, <code>CustomerNotifier</code></td><td>Change a status — event and SMS appear in the activity log</td><td>Ramazanov N.</td></tr>
+  </table>
+</section>
+
+<!-- ============ PATTERN IMPLEMENTATIONS ============ -->
+<section class="page-break">
+  <h3>2.5 Pattern implementations</h3>
+
+  <h4>Builder — <code>domain/order_builder.go</code></h4>
+  <p><b>Participants:</b> <code>OrderBuilder</code> (builder), <code>Order</code> (product), <code>OrderCommands.build</code> (director).
+  Each step stores a value and returns the builder; <code>Build()</code> validates everything at once, calculates distance and price,
+  and returns either a valid order or a map “field → error”.</p>
+<pre><code>order, err := domain.NewOrderBuilder().
+    ForCustomer(in.CustomerID).
+    Parcel(in.Description, in.WeightKg, domain.Money(in.DeclaredValue)).
+    Delivery(domain.DeliveryType(in.DeliveryType)).
+    ToAddress(in.Address, in.District).
+    PricedBy(in.PricingStrategy).
+    WithExtras(in.Extras...).
+    Build(time.Now())
+
+// inside Build():
+if o.WeightKg &lt;= 0 {
+    errs["weightKg"] = "weight must be greater than 0"
+} else if method != nil &amp;&amp; o.WeightKg &gt; method.MaxWeightKg() {
+    errs["weightKg"] = fmt.Sprintf("max %.0f kg for %s", method.MaxWeightKg(), method.Title())
+}
+if err := errs.OrNil(); err != nil {
+    return nil, err
+}</code></pre>
+  <p><b>Benefit:</b> an <code>Order</code> object is always valid. <b>Limitation:</b> the builder is mutable and is meant to be used once.</p>
+
+  <h4>Factory Method — <code>domain/delivery.go</code></h4>
+  <p><b>Participants:</b> product <code>DeliveryMethod</code>; concrete products <code>doorDelivery</code>, <code>pickupPointDelivery</code>,
+  <code>lockerDelivery</code>; creator <code>DeliveryCreator</code> with factory method <code>CreateMethod()</code>; concrete creators.</p>
+<pre><code>type DeliveryMethod interface {          // Product
+    Title() string
+    BaseFee() Money
+    MaxWeightKg() float64
+    NeedsPickupPoint() bool
+    NextStatuses(from OrderStatus) []OrderStatus
+}
+
+type DeliveryCreator interface {         // Creator
+    CreateMethod() DeliveryMethod
+}
+
+type LockerCreator struct{}              // Concrete creator
+func (LockerCreator) CreateMethod() DeliveryMethod { return lockerDelivery{} }
+
+func NewDeliveryMethod(t DeliveryType) (DeliveryMethod, error) {
+    creator, ok := creators[t]
+    if !ok {
+        return nil, RuleViolation("unknown delivery method %q", t)
+    }
+    return creator.CreateMethod(), nil
+}
+
+// Order only works with the interface:
+func (o *Order) NextStatuses() []OrderStatus {
+    method, _ := NewDeliveryMethod(o.DeliveryType)
+    return method.NextStatuses(o.Status)
+}</code></pre>
+  <p><b>Benefit:</b> a new delivery method = new product + new creator, no changes in <code>Order</code>.
+  <b>Limitation:</b> Go has no inheritance, so the creator is an interface rather than an abstract class.</p>
+</section>
+
+<section>
+  <h4>Strategy — <code>domain/pricing.go</code>, <code>domain/courier_selection.go</code></h4>
+  <p><b>Participants:</b> strategy interfaces <code>PricingStrategy</code> and <code>CourierSelector</code>; concrete strategies;
+  context — <code>basePrice</code> and the <code>AssignCourier</code> command, which receive the strategy chosen by the user.</p>
+<pre><code>type PricingStrategy interface {
+    Code() string
+    Title() string
+    Calculate(weightKg, distanceKm float64) Money
+}
+
+type WeightPricing struct{}      // 400 ₸ + 150 ₸ per started kg
+func (WeightPricing) Calculate(weightKg, _ float64) Money {
+    return 400 + 150*Money(math.Ceil(weightKg))
+}
+
+type DistancePricing struct{}    // 300 ₸ + 80 ₸ per started km
+func (DistancePricing) Calculate(_, distanceKm float64) Money {
+    return 300 + 80*Money(math.Ceil(distanceKm))
+}
+
+var PricingStrategies = []PricingStrategy{WeightPricing{}, DistancePricing{}}
+
+// courier selection: the command uses the strategy chosen in the UI
+selector, err := domain.CourierSelectorByCode(selectorCode)   // "nearest" or "least_loaded"
+courier, err := selector.Select(order, couriers)</code></pre>
+  <p><b>Benefit:</b> a new algorithm is a new type added to the list; the form shows it automatically.
+  <b>Limitation:</b> the strategy must be registered in the list.</p>
+
+  <h4>Decorator — <code>domain/price.go</code></h4>
+  <p><b>Participants:</b> component <code>PriceComponent</code>; concrete component <code>basePrice</code>;
+  decorators <code>insurance</code>, <code>fragile</code>, <code>express</code>. Each decorator holds the component it wraps and adds its own cost.</p>
+<pre><code>type PriceComponent interface {
+    Total() Money
+    Lines() []PriceLine
+}
+
+type fragile struct{ inner PriceComponent }
+func (e fragile) Total() Money { return e.inner.Total() + 400 }
+
+type express struct{ inner PriceComponent }        // +50% of everything inside
+func (e express) fee() Money   { return e.inner.Total().Percent(50) }
+func (e express) Total() Money { return e.inner.Total() + e.fee() }
+
+// CalculatePrice: base price, then wrap it with every selected extra
+var price PriceComponent = basePrice{strategy, delivery, in.WeightKg, in.DistanceKm}
+for _, extra := range Extras {
+    if slices.Contains(in.Extras, extra.Code) {
+        price = wrap(price, extra.Code, in.DeclaredValue)   // express(fragile(insurance(base)))
+    }
+}</code></pre>
+  <p><b>Benefit:</b> extras can be combined freely; the base calculation does not know about them.
+  <b>Limitation:</b> the order of wrapping matters (express must be last), so it is fixed by the <code>Extras</code> list.</p>
+</section>
+
+<section class="page-break">
+  <h4>Facade — <code>application/facade.go</code></h4>
+  <p><b>Participants:</b> facade <code>DeliveryFacade</code>; subsystem — commands, queries, repositories, publisher.
+  The facade also connects CQS: it runs a command and then a query to build the response.</p>
+<pre><code>func (f *DeliveryFacade) ChangeOrderStatus(id, status string) (query.OrderView, error) {
+    if err := f.orderCmd.ChangeStatus(id, status); err != nil {   // command: change data
+        return query.OrderView{}, err
+    }
+    return f.orders.Get(id)                                       // query: read result
+}
+
+// HTTP handler (adapters/in/http/handlers.go) knows only the facade:
+func (a *api) changeStatus(r *http.Request) (any, error) {
+    var in struct{ Status string `json:"status"` }
+    if err := readJSON(r, &amp;in); err != nil {
+        return nil, err
+    }
+    return a.facade.ChangeOrderStatus(r.PathValue("id"), in.Status)
+}</code></pre>
+  <p><b>Benefit:</b> the UI layer is simple and independent from the internals. <b>Limitation:</b> the facade grows with every new use case.</p>
+
+  <h4>Adapter — <code>adapters/out/notify/sms.go</code></h4>
+  <p><b>Participants:</b> target <code>port.Notifier</code>; adaptee <code>SmsGateway</code> (number without “+”, text ≤ 160 chars, returns a status code);
+  adapter <code>SmsNotifier</code>.</p>
+<pre><code>func (a *SmsNotifier) Notify(n port.Notification) error {
+    number := strings.TrimPrefix(n.Phone, "+")     // +77011234567 → 77011234567
+    text := n.Text
+    if runes := []rune(text); len(runes) &gt; 160 {
+        text = string(runes[:160])                 // gateway limit
+    }
+    switch a.gateway.Send(number, text) {          // status code → error
+    case 200:
+        return nil
+    case 400:
+        return fmt.Errorf("gateway rejected number %s", n.Phone)
+    default:
+        return fmt.Errorf("SMS gateway unavailable")
+    }
+}</code></pre>
+  <p><b>Benefit:</b> the application does not depend on the gateway; e-mail would be one more adapter.
+  <b>Limitation:</b> the gateway is simulated (messages are written to a file).</p>
+
+  <h4>Observer — <code>application/events/observer.go</code></h4>
+  <p><b>Participants:</b> subject <code>Publisher</code>; observer interface <code>Observer</code>; concrete observers
+  <code>ActivityRecorder</code> (activity log) and <code>CustomerNotifier</code> (SMS). Observers are subscribed in <code>main.go</code>.</p>
+<pre><code>type Observer interface { Update(e Event) }
+
+type Publisher struct{ observers []Observer }
+
+func (p *Publisher) Subscribe(o Observer) { p.observers = append(p.observers, o) }
+
+func (p *Publisher) Notify(e Event) {
+    for _, o := range p.observers {
+        o.Update(e)
+    }
+}
+
+// the command only notifies; it does not know who reacts:
+c.publisher.Notify(events.Event{Type: events.OrderStatusChanged, OrderID: id, Message: msg, At: now})</code></pre>
+  <p><b>Benefit:</b> a new reaction is a new observer, commands do not change.
+  <b>Limitation:</b> notification is synchronous, so a slow observer slows down the request.</p>
+</section>
+
+<!-- ============ UML ============ -->
+<section class="diagram">
+  <h3>2.6 UML diagrams</h3>
+  <p>Figure 1 shows the pattern participants inside the domain, Figure 2 — the application layer and adapters
+  (Facade, CQS, ports, Observer, Adapter), Figure 3 — the main scenario “Assign courier” as a sequence diagram.
+  The diagrams are generated from Mermaid sources in <code>docs/uml/</code>.</p>
+  <figure>
+    <img src="../uml/class-application.svg" alt="Class diagram: application and adapters">
+    <figcaption>Figure 2. Class diagram — application and adapters: Facade, CQS, ports, Observer, Adapter</figcaption>
+  </figure>
+</section>
+
+<section class="rotated">
+  <div class="inner">
+    <img src="../uml/class-domain.svg" alt="Class diagram: domain">
+    <figcaption>Figure 1. Class diagram — domain patterns: Builder, Factory Method, Strategy, Decorator</figcaption>
+  </div>
+</section>
+
+<section class="rotated">
+  <div class="inner">
+    <img src="../uml/sequence-assign-courier.svg" alt="Sequence diagram: assign courier">
+    <figcaption>Figure 3. Sequence diagram — main scenario “Assign courier” (Facade, CQS, Strategy, Observer, Adapter)</figcaption>
+  </div>
+</section>
+
+<!-- ============ UI ============ -->
+<section class="page-break">
+  <h3>2.7 User interface</h3>
+  <p>The interface is a single-page web application with tabs. The UI text is in Russian (local users).</p>
+  <figure><img src="img/01-orders.jpg"><figcaption>Figure 4. Orders list with search and status filter</figcaption></figure>
+  <figure><img src="img/02-validation.jpg"><figcaption>Figure 5. Validation: every invalid field is highlighted (Builder)</figcaption></figure>
+</section>
+<section class="page-break">
+  <figure><img src="img/03-order-form.jpg"><figcaption>Figure 6. Order form: two pricing strategies side by side (Strategy) and price breakdown with extras (Decorator)</figcaption></figure>
+  <figure><img src="img/04-order-details.jpg"><figcaption>Figure 7. Order card: courier assigned, only allowed next status is offered (Factory Method), notification after the change</figcaption></figure>
+</section>
+<section class="page-break">
+  <figure><img src="img/05-activity.jpg"><figcaption>Figure 8. Activity log filled by observers: status changes and SMS (Observer + Adapter)</figcaption></figure>
+  <figure><img src="img/06-report.jpg"><figcaption>Figure 9. Daily report with CSV / JSON export (final result)</figcaption></figure>
+</section>
+
+<!-- ============ TESTING ============ -->
+<section class="page-break">
+  <h3>2.8 Testing</h3>
+  <p>12 test scenarios. All of them are automated with <code>go test</code> (10 test functions) and were also checked manually in the UI.</p>
+  <table>
+    <tr><th>#</th><th style="width:17%">Scenario</th><th style="width:28%">Input</th><th style="width:27%">Expected result</th><th>Actual result</th><th>Test</th></tr>
+    <tr><td>1</td><td>Main user journey</td><td>Order to pickup point → assign courier → in transit → at pickup point → delivered</td><td>Status “Delivered”, courier released, 4 SMS, report shows 1 delivered order</td><td class="pass">As expected</td><td><code>TestMainJourney…</code></td></tr>
+    <tr><td>2</td><td>Switch pricing strategy</td><td>1 kg, 20 km, door delivery</td><td>By weight 1 550 ₸, by distance 2 900 ₸</td><td class="pass">As expected</td><td><code>TestPricingStrategies…</code></td></tr>
+    <tr><td>3</td><td>Switch courier strategy</td><td>Courier nearby (3 orders), courier far away (0 orders)</td><td>“Nearest” picks the first, “Least loaded” the second</td><td class="pass">As expected</td><td><code>TestCourierSelectors…</code></td></tr>
+    <tr><td>4</td><td>Reaction to an event</td><td>Status change</td><td>SMS sent to the normalized phone, entries in the activity log</td><td class="pass">As expected</td><td><code>TestMainJourney…</code></td></tr>
+    <tr><td>5</td><td>Save and reload</td><td>Create an order, reopen the storage (“restart”)</td><td>Order is found with the same price and customer</td><td class="pass">As expected</td><td><code>TestDataSurvivesRestart</code></td></tr>
+    <tr><td>6</td><td>Empty field</td><td>Empty description</td><td>Error on field <code>description</code></td><td class="pass">As expected</td><td><code>TestBuilderRejects…</code></td></tr>
+    <tr><td>7</td><td>Invalid value</td><td>Weight −2 kg</td><td>Error on field <code>weightKg</code></td><td class="pass">As expected</td><td><code>TestBuilderRejects…</code></td></tr>
+    <tr><td>8</td><td>Boundary</td><td>Locker: 15 kg and 15.1 kg</td><td>15 kg accepted, 15.1 kg rejected</td><td class="pass">As expected</td><td><code>TestBuilderRejects…</code></td></tr>
+    <tr><td>9</td><td>Rule violation</td><td>Created → In transit; door order → Waiting at pickup point</td><td>Error “cannot move from … to …”</td><td class="pass">As expected</td><td><code>TestStatusesDepend…</code></td></tr>
+    <tr><td>10</td><td>Rule violation</td><td>Delete customer with active order; edit assigned order; duplicate phone</td><td>All three refused</td><td class="pass">As expected</td><td><code>TestBusinessRules…</code></td></tr>
+    <tr><td>11</td><td>Decorator</td><td>Locker, 1 kg, value 50 000, insurance + express</td><td>Total 2 775 ₸, 4 breakdown lines</td><td class="pass">As expected</td><td><code>TestExtrasDecoratePrice</code></td></tr>
+    <tr><td>12</td><td>Adapter</td><td>Phone <code>+7…</code> with 300-char text; phone <code>123</code></td><td>Sent without “+”, text cut; error for <code>123</code></td><td class="pass">As expected</td><td><code>TestSmsNotifier…</code></td></tr>
+  </table>
+
+  <h4>Automated test output</h4>
+<pre><code>$ cd backend &amp;&amp; go test -v ./...
+--- PASS: TestSmsNotifierAdaptsToGateway (0.00s)
+ok   parcelhub/internal/adapters/out/notify
+--- PASS: TestMainJourneyAndEventReactions (0.00s)
+--- PASS: TestDataSurvivesRestart (0.00s)
+--- PASS: TestBusinessRulesAreEnforced (0.00s)
+ok   parcelhub/internal/application
+--- PASS: TestBuilderBuildsValidOrder (0.00s)
+--- PASS: TestBuilderRejectsInvalidInput (0.00s)   (6 sub-cases + boundary)
+--- PASS: TestPricingStrategiesGiveDifferentPrices (0.00s)
+--- PASS: TestExtrasDecoratePrice (0.00s)
+--- PASS: TestStatusesDependOnDeliveryMethod (0.00s)
+--- PASS: TestCourierSelectorsChooseDifferently (0.00s)
+ok   parcelhub/internal/domain</code></pre>
+
+  <h4>API error handling (checked manually)</h4>
+  <table>
+    <tr><th>Request</th><th>Response</th></tr>
+    <tr><td>POST /api/orders with an empty form</td><td>422, errors for every invalid field</td></tr>
+    <tr><td>POST /api/orders/{id}/status “delivered” for a new order</td><td>409 “cannot move from Created to Delivered”</td></tr>
+    <tr><td>DELETE /api/orders/{id} for an active order</td><td>409 “only a new or finished order can be deleted”</td></tr>
+    <tr><td>GET /api/orders/NOPE</td><td>404 “order NOPE not found”</td></tr>
+    <tr><td>POST /api/orders with malformed JSON</td><td>400 “invalid JSON”</td></tr>
+    <tr><td>Export with format=xml</td><td>409 “export format: csv or json”</td></tr>
+  </table>
+
+  <h3>2.9 Individual contribution</h3>
+  <p>This is an individual project. Ramazanov Nursultan Ramazanovich is responsible for all parts: domain model,
+  all seven patterns, application layer (CQS, facade, observer), adapters (HTTP API, JSON storage, SMS adapter),
+  React user interface, tests and documentation.</p>
+</section>
+
+<!-- ============ CONCLUSION ============ -->
+<section class="page-break">
+  <h2>3. Conclusion</h2>
+  <p>Parcel Hub implements the full user journey — create, configure, act, view and save the result — through a web
+  interface connected to real Go business logic. Seven design patterns are integrated into one application, and each
+  of them solves a concrete problem: Builder guarantees valid orders, Factory Method isolates delivery-method rules,
+  Strategy gives the user a choice of pricing and courier selection, Decorator makes extra services combinable,
+  Facade keeps the HTTP layer thin, Adapter isolates the SMS gateway, and Observer lets a status change trigger
+  independent reactions.</p>
+  <p>Hexagonal architecture with CQS separated the interface, business logic and storage, which made the code easy to
+  test (business logic is tested without HTTP and with a fake notifier) and easy to extend: most new requirements
+  are one new type in one file.</p>
+
+  <h2>4. Future Work</h2>
+  <ul>
+    <li>Replace JSON files with a database (PostgreSQL) — a new storage adapter, no changes in the domain.</li>
+    <li>Real SMS / Telegram / e-mail notifications — one more adapter for the <code>Notifier</code> port.</li>
+    <li>User accounts and roles (operator, courier, administrator).</li>
+    <li>Real addresses and a map instead of simplified districts.</li>
+    <li>Asynchronous event delivery and live UI updates (WebSocket) for several operators at once.</li>
+  </ul>
+
+  <h2>5. Tools and materials used</h2>
+  <ul>
+    <li>Go standard library documentation; React, Tailwind CSS and shadcn/ui documentation.</li>
+    <li>Course materials on design patterns (GoF).</li>
+    <li>AI tool: Claude (Anthropic) via Claude Code was used to help generate and refactor parts of the code,
+      the documentation and this report. All code was reviewed, run and tested by the student.</li>
+    <li>Mermaid — for UML diagrams.</li>
+  </ul>
+
+  <h2>Appendix: how to run</h2>
+<pre><code># 1. build the frontend (once)
+cd frontend &amp;&amp; npm install &amp;&amp; npm run build
+
+# 2. start the server (serves API and UI)
+cd backend &amp;&amp; go run ./cmd/server
+# open http://localhost:8088
+
+# tests
+cd backend &amp;&amp; go test ./...</code></pre>
+  <p>On the first start, sample data is created automatically: 5 customers, 4 couriers, 4 pickup points and 7 orders
+  in different statuses. Delete <code>backend/data</code> to start again.</p>
+</section>
+
+</body>
+</html>

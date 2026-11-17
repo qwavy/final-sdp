@@ -9,3 +9,6 @@ frontend/dist/
 
 # локальные настройки Claude Code
 .claude/
+
+# архив для Moodle
+final-sdp.zip

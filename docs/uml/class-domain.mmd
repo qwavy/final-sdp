@@ -1,0 +1,84 @@
+classDiagram
+  direction TB
+
+  class OrderBuilder {
+    +ForCustomer(id) OrderBuilder
+    +Parcel(desc, kg, value) OrderBuilder
+    +Delivery(type) OrderBuilder
+    +ToAddress(addr, district) OrderBuilder
+    +ToPickupPoint(point) OrderBuilder
+    +PricedBy(strategy) OrderBuilder
+    +WithExtras(codes) OrderBuilder
+    +Build(now) Order
+  }
+  class Order {
+    +ID string
+    +Status OrderStatus
+    +Price Money
+    +NextStatuses() []OrderStatus
+    +AssignCourier(courier, now) error
+    +ChangeStatus(to, now) error
+  }
+  OrderBuilder ..> Order : builds
+
+  class DeliveryCreator {
+    <<interface>>
+    +CreateMethod() DeliveryMethod
+  }
+  class DeliveryMethod {
+    <<interface>>
+    +Title() string
+    +BaseFee() Money
+    +MaxWeightKg() float64
+    +NextStatuses(from) []OrderStatus
+  }
+  DoorCreator ..|> DeliveryCreator
+  PickupPointCreator ..|> DeliveryCreator
+  LockerCreator ..|> DeliveryCreator
+  DoorCreator ..> doorDelivery : creates
+  PickupPointCreator ..> pickupPointDelivery : creates
+  LockerCreator ..> lockerDelivery : creates
+  doorDelivery ..|> DeliveryMethod
+  pickupPointDelivery ..|> DeliveryMethod
+  lockerDelivery ..|> DeliveryMethod
+  Order ..> DeliveryMethod : asks next statuses
+
+  class PricingStrategy {
+    <<interface>>
+    +Calculate(kg, km) Money
+  }
+  WeightPricing ..|> PricingStrategy
+  DistancePricing ..|> PricingStrategy
+
+  class PriceComponent {
+    <<interface>>
+    +Total() Money
+    +Lines() []PriceLine
+  }
+  class basePrice
+  class insurance {
+    -inner PriceComponent
+  }
+  class fragile {
+    -inner PriceComponent
+  }
+  class express {
+    -inner PriceComponent
+  }
+  basePrice ..|> PriceComponent
+  insurance ..|> PriceComponent
+  fragile ..|> PriceComponent
+  express ..|> PriceComponent
+  insurance o-- PriceComponent : wraps
+  fragile o-- PriceComponent : wraps
+  express o-- PriceComponent : wraps
+  basePrice --> PricingStrategy
+  basePrice --> DeliveryMethod
+  OrderBuilder ..> PriceComponent : CalculatePrice()
+
+  class CourierSelector {
+    <<interface>>
+    +Select(order, couriers) Courier
+  }
+  NearestCourier ..|> CourierSelector
+  LeastLoadedCourier ..|> CourierSelector

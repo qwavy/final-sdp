@@ -106,3 +106,9 @@ Domain не знает ни о HTTP, ни о файлах.
 
 Ошибки: `422` — ошибки ввода по полям, `404` — не найдено, `409` — нарушено правило
 (например, недопустимая смена статуса), `400` — некорректный запрос.
+
+## Документы для сдачи
+
+- [docs/report/report.pdf](docs/report/report.pdf) — отчёт (PDF). Исходник — `docs/report/report.html`.
+- [docs/uml/](docs/uml) — UML: диаграммы классов и последовательности (Mermaid `.mmd` + `.svg`).
+- [docs/PROJECT.md](docs/PROJECT.md) — проект по ТЗ, [docs/CODE.md](docs/CODE.md) — разбор кода.

@@ -1,0 +1,37 @@
+sequenceDiagram
+  actor U as Operator
+  participant UI as React UI
+  participant H as http api
+  participant F as DeliveryFacade
+  participant C as OrderCommands
+  participant R as Repositories (JSON)
+  participant S as CourierSelector
+  participant O as Order
+  participant P as Publisher
+  participant AR as ActivityRecorder
+  participant CN as CustomerNotifier
+  participant SMS as SmsNotifier
+  participant Q as OrderQueries
+
+  U->>UI: choose "Nearest courier", click "Assign courier"
+  UI->>H: POST /api/orders/{id}/assign
+  H->>F: AssignCourier(id, "nearest")
+  F->>C: AssignCourier(id, "nearest")
+  C->>R: orders.Get(id), couriers.List()
+  C->>S: Select(order, couriers)
+  S-->>C: courier
+  C->>O: AssignCourier(courier)
+  O-->>C: status = assigned
+  C->>R: couriers.Save(), orders.Save()
+  C->>P: Notify(OrderStatusChanged)
+  P->>AR: Update(event)
+  AR->>R: activity.Append()
+  P->>CN: Update(event)
+  CN->>SMS: Notify(phone, text)
+  SMS->>SMS: gateway.Send(number, text)
+  C-->>F: nil
+  F->>Q: Get(id)
+  Q-->>F: OrderView
+  F-->>H: OrderView
+  H-->>UI: 200 OK + JSON
+  UI-->>U: notification + refreshed tables
